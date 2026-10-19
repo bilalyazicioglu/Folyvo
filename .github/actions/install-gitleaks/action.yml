@@ -1,0 +1,18 @@
+name: Install gitleaks
+description: Download a pinned gitleaks release and verify its checksum
+inputs:
+  version:
+    description: gitleaks version without the leading v
+    default: "8.21.2"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        base="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+        curl -fsSL -o gitleaks.tar.gz "${base}/gitleaks_${VERSION}_linux_x64.tar.gz"
+        curl -fsSL -o checksums.txt "${base}/gitleaks_${VERSION}_checksums.txt"
+        grep " gitleaks_${VERSION}_linux_x64.tar.gz\$" checksums.txt | sha256sum -c -
+        tar -xzf gitleaks.tar.gz gitleaks

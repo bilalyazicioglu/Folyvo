@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check commit messages
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-commits.sh "origin/${BASE_REF}..${HEAD_SHA}"
+
+  fmt:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: detect
+        run: |
+          if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; else echo "rust=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.detect.outputs.rust == 'true'
+        uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+      - if: steps.detect.outputs.rust == 'true'
+        run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: detect
+        run: |
+          if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; else echo "rust=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.detect.outputs.rust == 'true'
+        uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+      - if: steps.detect.outputs.rust == 'true'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: detect
+        shell: bash
+        run: |
+          if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; else echo "rust=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.detect.outputs.rust == 'true'
+        uses: ./.github/actions/setup-rust
+      - if: steps.detect.outputs.rust == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - if: steps.detect.outputs.rust == 'true'
+        run: cargo nextest run --workspace --profile ci
+      - if: steps.detect.outputs.rust == 'true'
+        run: cargo test --workspace --doc
+
+  deny:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: detect
+        run: |
+          if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; else echo "rust=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.detect.outputs.rust == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - if: steps.detect.outputs.rust == 'true'
+        run: cargo deny check
+
+  secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-gitleaks
+      - name: Scan the commits in this change
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/${BASE_REF}..HEAD"
+          else
+            range="-1"
+          fi
+          ./gitleaks git --config .gitleaks.toml --redact --verbose --log-opts="$range"
+
+  workflows:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ACTIONLINT_VERSION: "1.7.7"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash" | bash -s -- "${ACTIONLINT_VERSION}"
+      - run: ./actionlint
+      - run: scripts/check-pins.sh
+
+  scripts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Lint the shell scripts
+        run: shellcheck scripts/*.sh scripts/tests/*.sh
+      - name: Run the script tests
+        run: |
+          for t in scripts/tests/*.test.sh; do
+            echo "== $t"
+            bash "$t"
+          done
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+  infra:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: detect
+        run: |
+          if [ -d infra ]; then echo "infra=true" >> "$GITHUB_OUTPUT"; else echo "infra=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.detect.outputs.infra == 'true'
+        uses: opentofu/setup-opentofu@v1
+      - if: steps.detect.outputs.infra == 'true'
+        run: tofu fmt -check -recursive infra
+      - if: steps.detect.outputs.infra == 'true'
+        run: tofu -chdir=infra init -backend=false -input=false
+      - if: steps.detect.outputs.infra == 'true'
+        run: tofu -chdir=infra validate
+
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check relative links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress './**/*.md'
+          fail: true
+
+  ci-success:
+    if: always()
+    needs: [commits, fmt, clippy, test, deny, secrets, workflows, scripts, infra, docs]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+      - name: Decide
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: scripts/ci-gate.sh

@@ -1,0 +1,4 @@
+title = "Folyvo secret scanning"
+
+[extend]
+useDefault = true
