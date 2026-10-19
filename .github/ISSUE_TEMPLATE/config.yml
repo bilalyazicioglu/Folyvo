@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or share an idea
+    url: https://github.com/bilalyazicioglu/Folyvo/discussions
+    about: Questions and open-ended ideas belong in Discussions.
+  - name: Report a security problem privately
+    url: https://github.com/bilalyazicioglu/Folyvo/security/advisories/new
+    about: Please do not file security problems as public issues.

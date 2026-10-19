@@ -37,4 +37,25 @@ has "readme is honest about the status" README.md "under development"
 has "readme explains release verification" README.md "gh attestation verify"
 has "readme links the contribution guide" README.md "CONTRIBUTING.md"
 
+exists .github/ISSUE_TEMPLATE/bug.yml
+exists .github/ISSUE_TEMPLATE/feature.yml
+exists .github/ISSUE_TEMPLATE/config.yml
+exists .github/PULL_REQUEST_TEMPLATE.md
+exists .github/CODEOWNERS
+exists .github/dependabot.yml
+
+has "blank issues are disabled" .github/ISSUE_TEMPLATE/config.yml "blank_issues_enabled: false"
+has "issue config links to discussions" .github/ISSUE_TEMPLATE/config.yml "https://github.com/bilalyazicioglu/Folyvo/discussions"
+has "issue config links to private security reporting" .github/ISSUE_TEMPLATE/config.yml "https://github.com/bilalyazicioglu/Folyvo/security/advisories/new"
+has "pull request template has the consent box" .github/PULL_REQUEST_TEMPLATE.md "- [ ] I have the right to submit this and agree that it is licensed under GPL-3.0-or-later."
+has "pull request template asks how it was tested" .github/PULL_REQUEST_TEMPLATE.md "How was it tested"
+has "code owners cover everything" .github/CODEOWNERS "* @bilalyazicioglu"
+has "dependabot updates github actions" .github/dependabot.yml "package-ecosystem: github-actions"
+has "dependabot commit prefix satisfies the commit lint" .github/dependabot.yml "prefix: build(deps)"
+
+yaml_files=(.github/ISSUE_TEMPLATE/bug.yml .github/ISSUE_TEMPLATE/feature.yml .github/ISSUE_TEMPLATE/config.yml .github/dependabot.yml)
+for f in "${yaml_files[@]}"; do
+  if [ -f "$root/$f" ] && ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0]))' "$root/$f" 2>/dev/null; then pass "$f parses as YAML"; else fail "$f parses as YAML"; fi
+done
+
 finish
