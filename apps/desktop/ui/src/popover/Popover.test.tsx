@@ -166,3 +166,14 @@ test("Escape closes the popover", async () => {
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(b.called("hide_popover")).toHaveLength(1));
 });
+
+test("after marking a version ready its layer plays the one animation the design allows", async () => {
+  const b = backend();
+  renderWithClient(<Popover />);
+  await userEvent.click(await screen.findByRole("button", { name: "Mark v9 ready" }));
+  await waitFor(() => expect(b.called("mark_ready")).toHaveLength(1));
+  b.state.history.itm_01 = [version({ seq: 9, isShareReady: true }), ...changedHistory.slice(1).map((v) => ({ ...v, isShareReady: false }))];
+  b.state.recent = [item({ status: "ready", latestSeq: 9 })];
+  await waitFor(() => expect(document.querySelector(".band--just-marked")).not.toBeNull());
+  expect(await screen.findByText("v9 is ready to share")).toBeInTheDocument();
+});

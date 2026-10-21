@@ -4,7 +4,7 @@ import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
 import { Strata } from "../components/Strata";
-import { useAction, useFolders, useHistory, useNow, useRecent, useStats } from "../queries";
+import { useAction, useFolders, useHistory, useJustMarked, useNow, useRecent, useStats } from "../queries";
 import { ago, changedSince, exportLabel, folderName, markLabel, storedLabel } from "../strata";
 
 interface Notice {
@@ -25,6 +25,7 @@ export function Popover() {
   const history = useHistory(current?.itemId);
   const act = useAction();
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [justMarked, setJustMarked] = useJustMarked();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -51,7 +52,10 @@ export function Popover() {
   const markLatest = async () => {
     if (!current || !latest) return;
     const r = await act.run(() => api.markReady(current.itemId, latest.id));
-    if (r.ok) setNotice({ text: `v${latest.seq} is ready to share` });
+    if (r.ok) {
+      setNotice({ text: `v${latest.seq} is ready to share` });
+      setJustMarked(latest.id);
+    }
   };
 
   const exportReady = async () => {
@@ -99,7 +103,7 @@ export function Popover() {
               {current.missing && (
                 <p className="card__status">This file was removed from its folder. Its versions are still saved.</p>
               )}
-              <Strata versions={versions} now={now} limit={4} />
+              <Strata versions={versions} now={now} limit={4} justMarkedId={justMarked ?? undefined} />
               {!current.missing && latest && (
                 <>
                   <p className="card__status">
