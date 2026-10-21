@@ -12,7 +12,21 @@
   "app": {
     "macOSPrivateApi": true,
     "windows": [],
-    "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'" }
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
   },
-  "bundle": { "active": true, "targets": ["app"], "icon": ["icons/icon.png"], "category": "Productivity" }
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "category": "Productivity"
+  }
 }
