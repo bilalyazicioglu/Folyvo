@@ -1,4 +1,5 @@
 mod strata;
+mod watch;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,7 +9,7 @@ use folyvo_core::ingest::IngestOutcome;
 use folyvo_core::ports::{Clock, RandomIdGen, SystemClock};
 use folyvo_core::{CoreError, Vault};
 
-const USAGE: &str = "usage: folyvo save <file> | log <file> | ready <file> <vN> | export <file> <folder> | restore <file> <vN>";
+const USAGE: &str = "usage: folyvo save <file> | log <file> | ready <file> <vN> | export <file> <folder> | restore <file> <vN> | watch <folder>";
 
 fn vault_dir() -> PathBuf {
     if let Some(v) = std::env::var_os("FOLYVO_VAULT") {
@@ -62,6 +63,10 @@ fn run(args: &[String]) -> Result<String, String> {
             let n = version_number(v)?;
             let new = open()?.restore(&PathBuf::from(file), n).map_err(|e| plain(e, file))?;
             Ok(format!("Restored v{n} as v{}\n", new.seq))
+        }
+        ["watch", folder] => {
+            watch::run(&vault_dir(), &PathBuf::from(folder))?;
+            Ok(String::new())
         }
         _ => Err(USAGE.into()),
     }
