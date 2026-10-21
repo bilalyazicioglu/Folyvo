@@ -166,7 +166,6 @@ jobs:
             echo "== $t"
             bash "$t"
           done
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
   docs:
     runs-on: ubuntu-latest

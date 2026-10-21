@@ -10,7 +10,7 @@ name = "folyvo"
 path = "src/main.rs"
 
 [dependencies]
-folyvo-core = { path = "../folyvo-core" }
+folyvo-core = { path = "../folyvo-core", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile = "3"
