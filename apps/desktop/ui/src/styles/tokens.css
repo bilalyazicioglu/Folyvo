@@ -1,0 +1,18 @@
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --border: #cdd3ce;
+  --ink: #2c3237;
+  --muted: #59636a;
+  --ready: #1f6f5c;
+  --ready-ink: #ffffff;
+  --amber: #d4a35a;
+  --amber-ink: #2c3237;
+  --layer-a: #4f625a;
+  --layer-b: #5e7068;
+  --layer-ink: #ffffff;
+  --danger: #9b2c2c;
+  --focus: #2c3237;
+  --radius: 10px;
+  --font: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+}
