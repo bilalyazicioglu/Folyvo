@@ -279,6 +279,7 @@ mod tests {
         assert_eq!(mode & 0o077, 0, "group/other bits set: {mode:o}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn extended_attributes_such_as_finder_tags_survive_a_restore() {
         const NAME: &str = "user.folyvo.test";
