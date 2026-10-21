@@ -18,6 +18,8 @@ use crate::restore::Restorer;
 use crate::share;
 use crate::store::{repo, Store};
 
+pub type EventReceiver = broadcast::Receiver<EngineEvent>;
+
 pub const EVENT_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,7 +172,7 @@ impl Engine {
         Ok(())
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
+    pub fn subscribe(&self) -> EventReceiver {
         self.events.subscribe()
     }
 

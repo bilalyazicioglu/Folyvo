@@ -48,22 +48,28 @@ impl WatchLoop {
 
     fn apply(&self, path: PathBuf, action: Action) -> Applied {
         match action {
-            Action::MarkMissing => match self.engine.mark_missing(&path) {
-                Ok(()) => Applied::Missing { path },
-                Err(e) => Applied::Failed { path, reason: e.to_string() },
-            },
+            Action::MarkMissing => self.vanished(path),
             Action::Ingest => match self.engine.ingest_path(&path) {
                 Ok(Some(IngestOutcome::Created(version))) => Applied::Saved { path, version },
                 Ok(Some(IngestOutcome::Unchanged(_))) => Applied::Unchanged { path },
                 Ok(None) | Err(CoreError::NotAFile(_)) => Applied::Skipped { path },
                 Err(CoreError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-                    match self.engine.mark_missing(&path) {
-                        Ok(()) => Applied::Missing { path },
-                        Err(e) => Applied::Failed { path, reason: e.to_string() },
-                    }
+                    self.vanished(path)
                 }
                 Err(e) => Applied::Failed { path, reason: e.to_string() },
             },
+        }
+    }
+
+    /// Only a file Folyvo is tracking can go missing. Editors create and delete scratch files all
+    /// the time; those were never versioned and must not be reported.
+    fn vanished(&self, path: PathBuf) -> Applied {
+        if !matches!(self.engine.item_status(&path), Ok(Some(_))) {
+            return Applied::Skipped { path };
+        }
+        match self.engine.mark_missing(&path) {
+            Ok(()) => Applied::Missing { path },
+            Err(e) => Applied::Failed { path, reason: e.to_string() },
         }
     }
 }
@@ -219,5 +225,24 @@ mod tests {
         assert_eq!(r.watch.next_deadline_in_ms(), Some(5_000));
         r.clock.advance(1_200);
         assert_eq!(r.watch.next_deadline_in_ms(), Some(3_800));
+    }
+
+    #[test]
+    fn a_temp_file_that_appears_and_disappears_is_never_reported() {
+        let mut r = rig();
+        let f = r.path("scratch.tmp-save");
+        fs::write(&f, b"x").unwrap();
+        r.watch.record(&f, FsEvent::Changed);
+        fs::remove_file(&f).unwrap();
+        r.watch.record(&f, FsEvent::Removed);
+        r.clock.advance(5_000);
+        assert!(matches!(r.watch.tick().as_slice(), [Applied::Skipped { .. }]));
+
+        let g = r.path("ghost.docx");
+        fs::write(&g, b"x").unwrap();
+        r.watch.record(&g, FsEvent::Changed);
+        fs::remove_file(&g).unwrap();
+        r.clock.advance(5_000);
+        assert!(matches!(r.watch.tick().as_slice(), [Applied::Skipped { .. }]));
     }
 }
