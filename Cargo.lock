@@ -236,7 +236,6 @@ name = "folyvo-cli"
 version = "0.1.0"
 dependencies = [
  "folyvo-core",
- "notify",
  "tempfile",
 ]
 
@@ -245,6 +244,7 @@ name = "folyvo-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "notify",
  "proptest",
  "reflink-copy",
  "rusqlite",

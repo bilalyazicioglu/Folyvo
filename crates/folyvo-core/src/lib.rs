@@ -23,6 +23,7 @@ pub mod ignore;
 pub mod reconcile;
 pub mod rescan;
 pub mod restore;
+pub mod runner;
 pub mod share;
 pub mod watch;
 pub mod xattrs;

@@ -1,14 +1,11 @@
-use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
-use folyvo_core::debounce::{FsEvent, KNOWN_QUIET_MS, NEW_QUIET_MS};
+use folyvo_core::debounce::{KNOWN_QUIET_MS, NEW_QUIET_MS};
 use folyvo_core::engine::{Engine, EngineEvent};
 use folyvo_core::ports::{Clock, SystemClock};
-use folyvo_core::rescan::rescan_root;
-use folyvo_core::watch::{Applied, WatchLoop};
-use notify::{EventKind, RecursiveMode, Watcher};
+use folyvo_core::runner::{OnApplied, Runner};
+use folyvo_core::watch::Applied;
 
 /// `FOLYVO_QUIET_MS="known,new"` shortens the quiet periods; tests use it, users never need to.
 fn quiet_periods() -> (i64, i64) {
@@ -56,51 +53,21 @@ pub fn run(vault: &Path, folder: &Path) -> Result<(), String> {
         Engine::open(vault, clock.clone(), Arc::new(folyvo_core::ports::RandomIdGen))
             .map_err(|e| e.to_string())?,
     );
-    let folder = std::fs::canonicalize(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    engine.add_root(&folder).map_err(|e| e.to_string())?;
-
-    let (tx, rx) = mpsc::channel::<(PathBuf, FsEvent)>();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        let Ok(event) = res else { return };
-        if matches!(event.kind, EventKind::Access(_)) {
-            return;
+    let cb: OnApplied = Arc::new(|applied| {
+        if let Some(line) = describe(applied) {
+            println!("{line}");
         }
-        for path in event.paths {
-            // Renames arrive as separate events per path; the file system decides what each one means.
-            let kind = if path.exists() { FsEvent::Changed } else { FsEvent::Removed };
-            let _ = tx.send((path, kind));
-        }
-    })
-    .map_err(|e| e.to_string())?;
-    watcher.watch(&folder, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
-
-    // The watcher is live before the scan starts: a file saved while the scan runs is queued as an
-    // event instead of being lost in the gap between the two.
+    });
     let mut events = engine.subscribe();
-    let report = rescan_root(&engine, &folder).map_err(|e| e.to_string())?;
+    let (runner, report) =
+        Runner::start(engine.clone(), clock, folder, quiet_periods(), cb).map_err(|e| e.to_string())?;
     announce_startup_scan(&engine, &mut events);
     for (path, why) in &report.failed {
         println!("Could not read {}: {why}", path.display());
     }
     drop(events);
-    println!("Watching {}", folder.display());
-
-    let (known, new) = quiet_periods();
-    let mut watch = WatchLoop::new(engine, clock, known, new);
+    println!("Watching {}", runner.folder().display());
     loop {
-        let wait = watch.next_deadline_in_ms().map(|ms| ms.clamp(10, 1_000)).unwrap_or(1_000);
-        match rx.recv_timeout(Duration::from_millis(wait as u64)) {
-            Ok((path, kind)) => watch.record(&path, kind),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err("the file watcher stopped".into()),
-        }
-        while let Ok((path, kind)) = rx.try_recv() {
-            watch.record(&path, kind);
-        }
-        for applied in watch.tick() {
-            if let Some(line) = describe(&applied) {
-                println!("{line}");
-            }
-        }
+        std::thread::park(); // the runner thread does the work; Ctrl-C ends the process
     }
 }

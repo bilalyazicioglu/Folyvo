@@ -37,6 +37,8 @@ pub enum CoreError {
     RootOverlapsVault(PathBuf),
     #[error("{0} already belongs to another file in the vault")]
     PathTaken(PathBuf),
+    #[error("could not watch the folder: {0}")]
+    Watch(String),
     #[error("vault data is inconsistent: {0}")]
     Corrupt(String),
 }
