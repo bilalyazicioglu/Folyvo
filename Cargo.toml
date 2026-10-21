@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/folyvo-core"]
+members = ["crates/folyvo-core", "crates/folyvo-cli"]
 
 [workspace.package]
 edition = "2021"
