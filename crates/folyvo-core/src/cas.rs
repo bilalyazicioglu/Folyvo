@@ -20,6 +20,10 @@ pub struct Cas {
 }
 
 impl Cas {
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn open(root: &Path) -> Result<Cas> {
         for sub in ["objects", "tmp"] {
             let p = root.join(sub);
@@ -336,5 +340,11 @@ mod tests {
         fs::create_dir_all(dir.path().join("vault/tmp/snap-dir/inner")).unwrap();
         assert_eq!(cas.sweep_tmp().unwrap(), 2);
         assert_eq!(cas.sweep_tmp().unwrap(), 0);
+    }
+
+    #[test]
+    fn root_returns_the_directory_it_was_opened_with() {
+        let (dir, cas) = cas();
+        assert_eq!(cas.root(), dir.path().join("vault"));
     }
 }
