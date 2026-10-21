@@ -18,14 +18,14 @@ test("layers are listed newest first and each names its version", () => {
 
 test("the share-ready layer says so in words, not only in colour", () => {
   render(<Strata now={now} versions={[version({ seq: 2 }), version({ seq: 1, isShareReady: true })]} />);
-  const ready = screen.getByText("Ready to share").closest("li")!;
+  const ready = screen.getByText("Ready to share").closest(".band")!;
   expect(ready).toHaveTextContent("v1");
   expect(ready.className).toContain("band--ready");
 });
 
 test("bigger files make thicker layers", () => {
   render(<Strata now={now} versions={[version({ seq: 2, size: 900 * 1024 * 1024 }), version({ seq: 1, size: 2_000 })]} />);
-  const [big, small] = screen.getAllByRole("listitem");
+  const [big, small] = Array.from(document.querySelectorAll<HTMLElement>(".band"));
   expect(parseInt(big.style.height)).toBeGreaterThan(parseInt(small.style.height));
 });
 
