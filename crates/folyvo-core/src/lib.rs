@@ -1,5 +1,6 @@
 //! Folyvo core: versioning, storage and sharing logic. No UI or Tauri dependency.
 
+pub mod cas;
 pub mod error;
 pub mod model;
 pub mod ports;
