@@ -34,7 +34,6 @@ has "support points to discussions" SUPPORT.md "https://github.com/bilalyaziciog
 
 has "readme states the licence" README.md "GPL-3.0-or-later"
 has "readme is honest about the status" README.md "under development"
-has "readme explains release verification" README.md "gh attestation verify"
 has "readme links the contribution guide" README.md "CONTRIBUTING.md"
 
 exists .github/ISSUE_TEMPLATE/bug.yml

@@ -9,10 +9,4 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-  - package-ecosystem: terraform
-    directory: /infra
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: build(deps)
 # The cargo and npm entries are added together with the code they update.
