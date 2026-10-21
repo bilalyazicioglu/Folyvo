@@ -63,3 +63,20 @@ pub struct ShareEvent {
     pub target_path: Option<String>,
     pub at: i64,
 }
+
+impl ShareEventKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShareEventKind::Marked => "marked",
+            ShareEventKind::Exported => "exported",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "marked" => Some(ShareEventKind::Marked),
+            "exported" => Some(ShareEventKind::Exported),
+            _ => None,
+        }
+    }
+}

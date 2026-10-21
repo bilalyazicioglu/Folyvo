@@ -15,3 +15,4 @@ pub mod vault;
 pub use error::CoreError;
 pub use model::Version;
 pub use vault::{History, Vault};
+pub mod share;

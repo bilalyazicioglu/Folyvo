@@ -2,7 +2,7 @@ use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::{CoreError, Result};
-use crate::model::{ContentHash, ItemId, Version, VersionId, VersionOrigin};
+use crate::model::{ContentHash, ItemId, ShareEvent, ShareEventKind, Version, VersionId, VersionOrigin};
 
 const VERSION_COLS: &str = "id, item_id, seq, content_hash, size, created_at, origin, restored_from, note";
 
@@ -128,6 +128,71 @@ pub(crate) fn versions_newest_first(c: &Connection, item: &ItemId) -> Result<Vec
         c.prepare(&format!("SELECT {VERSION_COLS} FROM versions WHERE item_id = ?1 ORDER BY seq DESC"))?;
     let rows = stmt.query_map([item.as_str()], row_to_version)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn item_exists(c: &Connection, item: &ItemId) -> Result<bool> {
+    Ok(c.query_row("SELECT 1 FROM items WHERE id = ?1", [item.as_str()], |_| Ok(())).optional()?.is_some())
+}
+
+#[allow(dead_code)] // used by export (Task 10)
+pub(crate) fn display_name(c: &Connection, item: &ItemId) -> Result<Option<String>> {
+    Ok(c.query_row("SELECT display_name FROM items WHERE id = ?1", [item.as_str()], |r| r.get(0))
+        .optional()?)
+}
+
+pub(crate) fn share_ready_version(c: &Connection, item: &ItemId) -> Result<Option<VersionId>> {
+    let id: Option<String> = c
+        .query_row("SELECT version_id FROM share_ready WHERE item_id = ?1", [item.as_str()], |r| r.get(0))
+        .optional()?;
+    id.map(|s| VersionId::parse(&s).map_err(|e| CoreError::Corrupt(e.to_string()))).transpose()
+}
+
+pub(crate) fn set_share_ready(c: &Connection, item: &ItemId, version: &VersionId, now: i64) -> Result<()> {
+    c.execute(
+        "INSERT INTO share_ready(item_id, version_id, marked_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(item_id) DO UPDATE SET version_id = excluded.version_id, marked_at = excluded.marked_at",
+        params![item.as_str(), version.as_str(), now],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn insert_event(c: &Connection, e: &ShareEvent, target_key: Option<&str>) -> Result<()> {
+    c.execute(
+        "INSERT INTO share_events(item_id, version_id, kind, target_path, target_key, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![e.item_id.as_str(), e.version_id.as_str(), e.kind.as_str(), e.target_path, target_key, e.at],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn events_for_item(c: &Connection, item: &ItemId) -> Result<Vec<ShareEvent>> {
+    let mut stmt = c.prepare(
+        "SELECT item_id, version_id, kind, target_path, at FROM share_events WHERE item_id = ?1 ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map([item.as_str()], |r| {
+        let item_id: String = r.get(0)?;
+        let version_id: String = r.get(1)?;
+        let kind: String = r.get(2)?;
+        Ok(ShareEvent {
+            item_id: ItemId::parse(&item_id).map_err(|e| conv(0, e))?,
+            version_id: VersionId::parse(&version_id).map_err(|e| conv(1, e))?,
+            kind: ShareEventKind::parse(&kind).ok_or_else(|| conv(2, "unknown event kind"))?,
+            target_path: r.get(3)?,
+            at: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+#[allow(dead_code)] // used by the watcher (Task 15)
+pub(crate) fn is_export_target(c: &Connection, key: &str) -> Result<bool> {
+    Ok(c.query_row(
+        "SELECT 1 FROM share_events WHERE kind = 'exported' AND target_key = ?1 LIMIT 1",
+        [key],
+        |_| Ok(()),
+    )
+    .optional()?
+    .is_some())
 }
 
 #[cfg(test)]
