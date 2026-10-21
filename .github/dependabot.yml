@@ -9,4 +9,15 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-# The cargo and npm entries are added together with the code they update.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+  - package-ecosystem: npm
+    directory: /apps/desktop/ui
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)

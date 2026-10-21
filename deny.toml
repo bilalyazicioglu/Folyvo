@@ -4,6 +4,9 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is pulled in by Tauri's Linux GTK backend, which Folyvo never builds (macOS only). It is unmaintained, not vulnerable." },
+]
 
 [licenses]
 version = 2
