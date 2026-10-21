@@ -27,6 +27,8 @@ pub enum CoreError {
     ShareReadyChanged { expected: VersionId, actual: VersionId },
     #[error("item not found")]
     ItemMissing,
+    #[error("this file has no version v{0}")]
+    NoSuchVersionNumber(i64),
     #[error("version {0} not found")]
     VersionMissing(VersionId),
     #[error("stored object {0} is missing from the vault")]
