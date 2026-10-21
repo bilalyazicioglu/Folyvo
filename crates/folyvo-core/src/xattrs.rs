@@ -13,3 +13,51 @@ pub fn copy_xattrs(from: &Path, to: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+/// Windows has no extended attributes to carry over.
+#[cfg(not(unix))]
+pub fn copy_xattrs(_from: &Path, _to: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    const NAME: &str = "user.folyvo.test";
+
+    fn supported(path: &std::path::Path) -> bool {
+        xattr::set(path, NAME, b"probe").is_ok()
+    }
+
+    #[test]
+    fn attributes_are_copied_from_one_file_to_another() {
+        if !xattr::SUPPORTED_PLATFORM {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"y").unwrap();
+        if !supported(&a) {
+            eprintln!("skipped: this filesystem has no user xattrs");
+            return;
+        }
+        xattr::set(&a, NAME, b"tagged").unwrap();
+        copy_xattrs(&a, &b).unwrap();
+        assert_eq!(xattr::get(&b, NAME).unwrap().as_deref(), Some(&b"tagged"[..]));
+    }
+
+    #[test]
+    fn a_file_without_attributes_copies_nothing_and_succeeds() {
+        if !xattr::SUPPORTED_PLATFORM {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"y").unwrap();
+        copy_xattrs(&a, &b).unwrap();
+    }
+}
