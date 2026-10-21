@@ -44,6 +44,7 @@ pub(crate) fn item_at_key(c: &Connection, key: &str) -> Result<Option<ItemId>> {
     id.map(|s| ItemId::parse(&s).map_err(|e| CoreError::Corrupt(e.to_string()))).transpose()
 }
 
+#[allow(dead_code)] // used by export and restore (Tasks 10-11)
 pub(crate) fn current_path(c: &Connection, item: &ItemId) -> Result<Option<String>> {
     Ok(c.query_row(
         "SELECT path FROM locations WHERE item_id = ?1 AND is_current = 1",
@@ -112,6 +113,7 @@ pub(crate) fn latest_version(c: &Connection, item: &ItemId) -> Result<Option<Ver
     .optional()?)
 }
 
+#[allow(dead_code)] // used by share and restore (Tasks 9, 11)
 pub(crate) fn version(c: &Connection, id: &VersionId) -> Result<Option<Version>> {
     Ok(c.query_row(
         &format!("SELECT {VERSION_COLS} FROM versions WHERE id = ?1"),

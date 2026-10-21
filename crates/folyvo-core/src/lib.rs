@@ -1,5 +1,4 @@
 //! Folyvo core: versioning, storage and sharing logic. No UI or Tauri dependency.
-#![allow(dead_code)] // TEMP: removed in Task 8A, once the vault facade uses every internal item
 
 pub mod cas;
 pub mod error;
@@ -12,3 +11,7 @@ pub mod canonical;
 pub mod ingest;
 #[cfg(test)]
 mod testutil;
+pub mod vault;
+pub use error::CoreError;
+pub use model::Version;
+pub use vault::{History, Vault};
