@@ -98,7 +98,7 @@ impl<'a> Exporter<'a> {
     }
 }
 
-fn file_hash(path: &Path) -> Result<ContentHash> {
+pub(crate) fn file_hash(path: &Path) -> Result<ContentHash> {
     let mut f = File::open(path).map_err(|e| CoreError::io(path, e))?;
     let mut hasher = blake3::Hasher::new();
     let mut buf = vec![0u8; 64 * 1024];
