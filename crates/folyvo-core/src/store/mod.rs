@@ -1,3 +1,5 @@
+pub(crate) mod repo;
+
 use std::path::Path;
 
 use rusqlite::Connection;
