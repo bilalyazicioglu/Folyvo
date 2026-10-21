@@ -13,7 +13,7 @@ uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["sync"] }
 unicode-normalization = "0.1"
 reflink-copy = "0.1"
-notify = "6"
+notify = "8"
 
 [target.'cfg(unix)'.dependencies]
 xattr = "1"
