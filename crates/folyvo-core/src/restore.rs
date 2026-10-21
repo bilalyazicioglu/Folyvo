@@ -91,12 +91,14 @@ fn write_atomically(object: &Path, target: &Path) -> Result<()> {
 }
 
 #[cfg(unix)]
+/// A file recreated from the vault is private until the owner decides otherwise.
 fn default_permissions(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
+/// A file recreated from the vault is private until the owner decides otherwise.
 fn default_permissions(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
@@ -260,5 +262,17 @@ mod tests {
         let names: Vec<_> =
             fs::read_dir(p.parent().unwrap()).unwrap().map(|x| x.unwrap().file_name()).collect();
         assert_eq!(names.len(), 1, "{names:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_recreated_file_is_private_to_the_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut e = Env::new();
+        let (item, v1, p) = two_versions(&mut e, "a.docx");
+        fs::remove_file(&p).unwrap();
+        restore(&mut e, &item, &v1.id).unwrap();
+        let mode = fs::metadata(&p).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "group/other bits set: {mode:o}");
     }
 }
