@@ -1,3 +1,5 @@
+pub mod dto;
+
 pub const APP_NAME: &str = "Folyvo";
 
 /// Starts the app. Filled in by the tray task.
