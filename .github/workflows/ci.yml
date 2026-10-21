@@ -68,7 +68,7 @@ jobs:
         with:
           components: clippy
       - if: steps.detect.outputs.rust == 'true'
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude folyvo-desktop --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -94,9 +94,9 @@ jobs:
         with:
           tool: cargo-nextest
       - if: steps.detect.outputs.rust == 'true'
-        run: cargo nextest run --workspace --profile ci
+        run: cargo nextest run --workspace --exclude folyvo-desktop --profile ci
       - if: steps.detect.outputs.rust == 'true'
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --exclude folyvo-desktop --doc
 
   deny:
     runs-on: ubuntu-latest
@@ -181,9 +181,25 @@ jobs:
           args: --offline --no-progress './**/*.md'
           fail: true
 
+  desktop:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+      - name: Test and lint the desktop crate
+        run: |
+          cargo test -p folyvo-desktop
+          cargo clippy -p folyvo-desktop --all-targets -- -D warnings
+
   ci-success:
     if: always()
-    needs: [commits, fmt, clippy, test, deny, secrets, workflows, scripts, docs]
+    needs: [commits, fmt, clippy, test, deny, secrets, workflows, scripts, docs, desktop]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
