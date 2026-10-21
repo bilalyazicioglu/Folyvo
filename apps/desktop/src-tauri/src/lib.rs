@@ -1,4 +1,5 @@
 pub mod dto;
+pub mod errors;
 
 pub const APP_NAME: &str = "Folyvo";
 
