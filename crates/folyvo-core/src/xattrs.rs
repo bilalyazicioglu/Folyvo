@@ -2,6 +2,7 @@ use std::path::Path;
 
 /// Copy every extended attribute from `from` to `to`. Callers treat failure as best-effort:
 /// a filesystem without xattrs must not make a restore fail.
+#[cfg(unix)]
 pub fn copy_xattrs(from: &Path, to: &Path) -> std::io::Result<()> {
     for name in xattr::list(from)? {
         // Per attribute and best effort: macOS refuses to set some system attributes on a new
