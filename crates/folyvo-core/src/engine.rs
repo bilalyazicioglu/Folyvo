@@ -18,6 +18,8 @@ use crate::restore::Restorer;
 use crate::share;
 use crate::store::{repo, Store};
 
+pub use tokio::sync::broadcast::error::RecvError;
+
 pub type EventReceiver = broadcast::Receiver<EngineEvent>;
 
 pub const EVENT_CAPACITY: usize = 256;

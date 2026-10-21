@@ -1,6 +1,7 @@
 pub mod api;
 pub mod dto;
 pub mod errors;
+pub mod runtime;
 
 pub const APP_NAME: &str = "Folyvo";
 

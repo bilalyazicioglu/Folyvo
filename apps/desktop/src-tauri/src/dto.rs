@@ -199,6 +199,15 @@ impl From<EngineEvent> for EngineEventDto {
     }
 }
 
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FolderDto {
+    pub path: String,
+    /// Set when the folder cannot be watched right now (gone, unmounted, not allowed).
+    pub problem: Option<crate::errors::UserError>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
