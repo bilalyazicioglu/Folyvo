@@ -73,7 +73,6 @@ pub struct VaultStats {
     pub bytes: u64,
 }
 
-#[allow(dead_code)] // used by the startup rescan (Task 16)
 pub(crate) struct Tracked {
     pub item: ItemId,
     pub path: PathBuf,
@@ -225,8 +224,8 @@ impl Engine {
                 }
             }
         }
-        if ignored.unwrap_or_else(|| is_ignored(path)) {
-            return Ok(true);
+        if ignored.unwrap_or_else(|| is_ignored(path)) || crate::dataless::is_dataless(path) {
+            return Ok(true); // hashing a placeholder would force an iCloud download
         }
         repo::is_export_target(c, &key)
     }
@@ -418,7 +417,6 @@ impl Engine {
         self.lock().cas.path_of(hash)
     }
 
-    #[allow(dead_code)] // used by the startup rescan (Task 16)
     pub(crate) fn tracked_under(&self, root: &Path) -> Result<Vec<Tracked>> {
         let root_key = canonical_key(root)?;
         let g = self.lock();
