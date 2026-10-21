@@ -8,7 +8,7 @@ rust-version.workspace = true
 [dependencies]
 blake3 = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
-thiserror = "1"
+thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["sync"] }
 unicode-normalization = "0.1"
