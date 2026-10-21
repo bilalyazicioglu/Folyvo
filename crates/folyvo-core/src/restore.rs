@@ -77,6 +77,9 @@ fn write_atomically(object: &Path, target: &Path) -> Result<()> {
     let tmp = parent.join(format!(".{name}.folyvo-restore-{}", uuid::Uuid::new_v4().simple()));
     fs::copy(object, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
     let result = (|| {
+        if target.exists() {
+            let _ = crate::xattrs::copy_xattrs(target, &tmp); // best effort
+        }
         match fs::metadata(target) {
             Ok(existing) => fs::set_permissions(&tmp, existing.permissions()),
             Err(_) => default_permissions(&tmp),
@@ -274,5 +277,19 @@ mod tests {
         restore(&mut e, &item, &v1.id).unwrap();
         let mode = fs::metadata(&p).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "group/other bits set: {mode:o}");
+    }
+
+    #[test]
+    fn extended_attributes_such_as_finder_tags_survive_a_restore() {
+        const NAME: &str = "user.folyvo.test";
+        let mut e = Env::new();
+        let (item, v1, p) = two_versions(&mut e, "a.docx");
+        if xattr::set(&p, NAME, b"red").is_err() {
+            eprintln!("skipped: this filesystem has no user xattrs");
+            return;
+        }
+        restore(&mut e, &item, &v1.id).unwrap();
+        assert_eq!(xattr::get(&p, NAME).unwrap().as_deref(), Some(&b"red"[..]));
+        assert_eq!(fs::read(&p).unwrap(), b"one");
     }
 }
