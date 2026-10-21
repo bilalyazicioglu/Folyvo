@@ -27,6 +27,8 @@ cargo nextest run --workspace
 cargo deny check
 ```
 
+If you touch the desktop app, also run `npm --prefix apps/desktop/ui test` and read [docs/development/desktop.md](docs/development/desktop.md).
+
 ## How we work
 
 Tests come first. A change that alters behaviour starts with a failing test, followed by the smallest change that makes it pass. A bug fix starts with a test that reproduces the bug, committed before the fix.

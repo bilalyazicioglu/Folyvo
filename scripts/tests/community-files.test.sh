@@ -52,6 +52,13 @@ has "code owners cover everything" .github/CODEOWNERS "* @bilalyazicioglu"
 has "dependabot updates github actions" .github/dependabot.yml "package-ecosystem: github-actions"
 has "dependabot commit prefix satisfies the commit lint" .github/dependabot.yml "prefix: build(deps)"
 
+exists docs/development/desktop.md
+has "docs index links the desktop guide" docs/README.md "development/desktop.md"
+has "desktop guide explains the unsigned first launch" docs/development/desktop.md "Open Anyway"
+has "desktop guide documents the vault override" docs/development/desktop.md "FOLYVO_VAULT"
+has "desktop guide has the manual demo checklist" docs/development/desktop.md "Manual demo"
+has "contributing mentions the UI tests" CONTRIBUTING.md "npm --prefix apps/desktop/ui test"
+
 yaml_files=(.github/ISSUE_TEMPLATE/bug.yml .github/ISSUE_TEMPLATE/feature.yml .github/ISSUE_TEMPLATE/config.yml .github/dependabot.yml)
 for f in "${yaml_files[@]}"; do
   if [ -f "$root/$f" ] && ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0]))' "$root/$f" 2>/dev/null; then pass "$f parses as YAML"; else fail "$f parses as YAML"; fi

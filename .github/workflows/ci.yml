@@ -189,6 +189,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/ui/package-lock.json
+      - name: Check, test and build the UI
+        run: |
+          npm --prefix apps/desktop/ui ci
+          npm --prefix apps/desktop/ui run typecheck
+          npm --prefix apps/desktop/ui test
+          npm --prefix apps/desktop/ui run build
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
@@ -196,6 +207,10 @@ jobs:
         run: |
           cargo test -p folyvo-desktop
           cargo clippy -p folyvo-desktop --all-targets -- -D warnings
+      - name: Fail when the generated TypeScript types drifted
+        run: |
+          git diff --exit-code -- apps/desktop/ui/src/generated
+          test -z "$(git status --porcelain -- apps/desktop/ui/src/generated)"
 
   ci-success:
     if: always()
