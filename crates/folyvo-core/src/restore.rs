@@ -36,7 +36,7 @@ impl<'a> Restorer<'a> {
         let object = self.cas.path_of(&target.content_hash);
 
         // Unsaved work inside the debounce window must not be lost.
-        if path.is_file() {
+        if path.is_file() && !crate::dataless::is_dataless(&path) {
             Ingestor::new(self.store, self.cas, self.clock, self.ids).ingest(&path)?;
         }
 
