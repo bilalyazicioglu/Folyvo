@@ -72,7 +72,7 @@ fn ready_export_and_restore_work_end_to_end() {
     let (_, log) = folyvo(&vault, &["log", p]);
     let ready_line = log.lines().find(|l| l.contains("ready to share")).expect(&log);
     assert!(ready_line.starts_with("v1"), "{log}");
-    assert!(log.contains("changed since"), "{log}");
+    assert!(log.contains("Changed since v1"), "{log}");
 
     let (ok, text) = folyvo(&vault, &["export", p, out.to_str().unwrap()]);
     assert!(ok && text.contains("Exported v1 to"), "{text}");
