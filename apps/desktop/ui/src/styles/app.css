@@ -65,6 +65,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .panel h1 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
 .panel .where { margin: 2px 0 14px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .panel__top { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.panel__top .btn--primary { flex: 0 0 auto; min-width: 160px; }
 .row { background: var(--surface); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .row .strata .band { margin-bottom: 8px; }
 .row__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
