@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, AppError } from "../api";
 import { Band } from "../components/Band";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { useAction, useHistory, useNow, useRecent } from "../queries";
+import { useAction, useHistory, useJustMarked, useNow, useRecent } from "../queries";
 import { exportLabel, markLabel } from "../strata";
 import { NameField } from "./NameField";
 
@@ -14,6 +14,7 @@ export function Panel({ itemId }: { itemId: string }) {
   const [naming, setNaming] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; reveal?: string } | null>(null);
+  const [justMarked, setJustMarked] = useJustMarked();
 
   const summary = recent.data?.find((i) => i.itemId === itemId);
   const versions = history.data ?? [];
@@ -30,6 +31,11 @@ export function Panel({ itemId }: { itemId: string }) {
   const saveName = async (id: string, value: string) => {
     await act.run(() => api.nameVersion(id, value.trim() === "" ? null : value));
     setNaming(null);
+  };
+
+  const markRow = async (id: string) => {
+    const r = await act.run(() => api.markReady(itemId, id));
+    if (r.ok) setJustMarked(id);
   };
 
   const restore = async (id: string, seq: number) => {
@@ -72,7 +78,7 @@ export function Panel({ itemId }: { itemId: string }) {
       <ul className="rows" style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {versions.map((v, i) => (
           <li key={v.id} className="row" aria-label={`Version ${v.seq}`}>
-            <Band version={v} index={i} now={now} />
+            <Band version={v} index={i} now={now} justMarked={v.id === justMarked} />
             {naming === v.id ? (
               <NameField seq={v.seq} initial={v.note ?? ""} busy={act.busy} onSave={(value) => void saveName(v.id, value)} onCancel={() => setNaming(null)} />
             ) : (
@@ -81,7 +87,7 @@ export function Panel({ itemId }: { itemId: string }) {
                   Name
                 </button>
                 {!v.isShareReady && (
-                  <button type="button" className="btn" disabled={act.busy} onClick={() => void act.run(() => api.markReady(itemId, v.id))}>
+                  <button type="button" className="btn" disabled={act.busy} onClick={() => void markRow(v.id)}>
                     {markLabel(v.seq)}
                   </button>
                 )}
