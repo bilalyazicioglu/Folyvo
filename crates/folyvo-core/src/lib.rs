@@ -16,6 +16,7 @@ pub use error::CoreError;
 pub use model::Version;
 pub use vault::{History, Vault};
 pub mod debounce;
+pub mod engine;
 pub mod export;
 pub mod ignore;
 pub mod reconcile;

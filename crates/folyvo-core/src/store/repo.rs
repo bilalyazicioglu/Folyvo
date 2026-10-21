@@ -192,6 +192,86 @@ pub(crate) fn is_export_target(c: &Connection, key: &str) -> Result<bool> {
     .is_some())
 }
 
+pub(crate) fn insert_root(c: &Connection, path: &str, now: i64) -> Result<()> {
+    c.execute("INSERT OR IGNORE INTO watched_roots(path, added_at) VALUES (?1, ?2)", params![path, now])?;
+    Ok(())
+}
+
+pub(crate) fn delete_root(c: &Connection, path: &str) -> Result<()> {
+    c.execute("DELETE FROM watched_roots WHERE path = ?1", [path])?;
+    Ok(())
+}
+
+pub(crate) fn list_roots(c: &Connection) -> Result<Vec<String>> {
+    let mut stmt = c.prepare("SELECT path FROM watched_roots ORDER BY id")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+pub(crate) fn all_current(c: &Connection) -> Result<Vec<(ItemId, String, String)>> {
+    let mut stmt = c.prepare(
+        "SELECT item_id, canonical_key, path FROM locations WHERE is_current = 1 ORDER BY item_id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let id: String = r.get(0)?;
+        Ok((ItemId::parse(&id).map_err(|e| conv(0, e))?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn current_key(c: &Connection, item: &ItemId) -> Result<Option<String>> {
+    Ok(c.query_row(
+        "SELECT canonical_key FROM locations WHERE item_id = ?1 AND is_current = 1",
+        [item.as_str()],
+        |r| r.get(0),
+    )
+    .optional()?)
+}
+
+pub(crate) fn item_at_path(c: &Connection, path: &str) -> Result<Option<ItemId>> {
+    let id: Option<String> = c
+        .query_row("SELECT item_id FROM locations WHERE path = ?1 AND is_current = 1", [path], |r| r.get(0))
+        .optional()?;
+    id.map(|s| ItemId::parse(&s).map_err(|e| CoreError::Corrupt(e.to_string()))).transpose()
+}
+
+pub(crate) fn all_object_hashes(c: &Connection) -> Result<Vec<String>> {
+    let mut stmt = c.prepare("SELECT content_hash FROM objects")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+pub(crate) fn item_flags(c: &Connection, item: &ItemId) -> Result<Option<(String, bool)>> {
+    Ok(c.query_row("SELECT display_name, missing FROM items WHERE id = ?1", [item.as_str()], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0))
+    })
+    .optional()?)
+}
+
+pub(crate) fn set_note(c: &Connection, version: &VersionId, note: Option<&str>) -> Result<bool> {
+    Ok(c.execute("UPDATE versions SET note = ?2 WHERE id = ?1", params![version.as_str(), note])? > 0)
+}
+
+pub(crate) fn recent_items(c: &Connection, limit: u32) -> Result<Vec<ItemId>> {
+    let mut stmt = c.prepare(
+        "SELECT item_id FROM versions GROUP BY item_id ORDER BY MAX(created_at) DESC, MAX(seq) DESC, item_id ASC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], |r| {
+        let id: String = r.get(0)?;
+        ItemId::parse(&id).map_err(|e| conv(0, e))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn counts(c: &Connection) -> Result<(u64, u64, u64)> {
+    let (i, v, b): (i64, i64, i64) = c.query_row(
+        "SELECT (SELECT COUNT(*) FROM items), (SELECT COUNT(*) FROM versions), (SELECT COALESCE(SUM(size), 0) FROM objects)",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    Ok((i as u64, v as u64, b as u64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
