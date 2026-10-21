@@ -86,7 +86,7 @@ impl<'a> Exporter<'a> {
             self.cas.verify(hash)?; // never materialise bit-rotted bytes
             fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
             let tmp = dir.join(format!(".part-{}", uuid::Uuid::new_v4().simple()));
-            fs::copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
+            reflink_copy::reflink_or_copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
             make_read_only(&tmp)?;
             fs::rename(&tmp, &path).map_err(|e| {
                 let _ = fs::remove_file(&tmp);

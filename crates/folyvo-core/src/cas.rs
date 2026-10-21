@@ -43,6 +43,17 @@ impl Cas {
     }
 
     pub fn put_file(&self, src: &Path) -> Result<Stored> {
+        let kind = fs::metadata(src).map_err(|e| CoreError::io(src, e))?;
+        if !kind.is_file() {
+            return Err(CoreError::NotAFile(src.to_path_buf())); // never clone a whole package into tmp
+        }
+        let snapshot = self.root.join("tmp").join(format!("snap-{}", uuid::Uuid::new_v4().simple()));
+        if reflink_copy::reflink(src, &snapshot).is_ok() {
+            // The snapshot is private to us, so it cannot change while we read it.
+            let stored = self.put_file_with_hook(&snapshot, &mut || {});
+            let _ = fs::remove_file(&snapshot);
+            return stored;
+        }
         self.put_file_with_hook(src, &mut || {})
     }
 
@@ -368,5 +379,41 @@ mod tests {
         let (dir, _cas) = cas();
         let mode = fs::metadata(dir.path().join("vault")).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "{mode:o}");
+    }
+
+    #[test]
+    fn put_file_leaves_no_snapshot_behind_and_stores_exact_bytes() {
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"snapshot me");
+        let stored = cas.put_file(&src).unwrap();
+        assert_eq!(fs::read(cas.path_of(&stored.hash)).unwrap(), b"snapshot me");
+        assert_eq!(fs::read_dir(dir.path().join("vault/tmp")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn put_file_on_a_missing_source_still_reports_the_missing_file() {
+        let (dir, cas) = cas();
+        let err = cas.put_file(&dir.path().join("nope.txt")).unwrap_err();
+        assert!(matches!(err, CoreError::Io { .. }), "{err}");
+    }
+
+    #[test]
+    fn put_file_on_a_directory_still_reports_not_a_file() {
+        let (dir, cas) = cas();
+        let sub = dir.path().join("Report.pages");
+        fs::create_dir(&sub).unwrap();
+        assert!(matches!(cas.put_file(&sub), Err(CoreError::NotAFile(_))));
+    }
+
+    // Characterisation (finding F-APFS-1): APFS supports copy-on-write clones inside one volume.
+    // If this fails on a macOS runner, the snapshot path is dead code there: record why in docs/findings/.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn apfs_can_clone_a_file_within_a_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        fs::write(&a, b"x").unwrap();
+        reflink_copy::reflink(&a, &b).expect("expected APFS clonefile to succeed in the temp dir");
+        assert_eq!(fs::read(&b).unwrap(), b"x");
     }
 }

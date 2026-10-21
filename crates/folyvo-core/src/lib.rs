@@ -25,3 +25,4 @@ pub mod rescan;
 pub mod restore;
 pub mod share;
 pub mod watch;
+pub mod xattrs;
