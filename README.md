@@ -9,7 +9,7 @@ The idea is to give people who work with documents the guarantees that developer
 
 ## Status
 
-Folyvo is under development and nothing has been released yet. The first target is macOS on Apple Silicon.
+Folyvo is under development and nothing has been released yet. The first target is macOS on Apple Silicon, as a menu bar app. See [how to run it](docs/development/desktop.md).
 
 ## Documentation
 
