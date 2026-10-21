@@ -87,9 +87,7 @@ impl<'a> Exporter<'a> {
             fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
             let tmp = dir.join(format!(".part-{}", uuid::Uuid::new_v4().simple()));
             fs::copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
-            let mut perms = fs::metadata(&tmp).map_err(|e| CoreError::io(&tmp, e))?.permissions();
-            perms.set_readonly(true);
-            fs::set_permissions(&tmp, perms).map_err(|e| CoreError::io(&tmp, e))?;
+            make_read_only(&tmp)?;
             fs::rename(&tmp, &path).map_err(|e| {
                 let _ = fs::remove_file(&tmp);
                 CoreError::io(&path, e)
@@ -125,11 +123,29 @@ fn numbered(name: &str, n: u32) -> String {
     }
 }
 
+/// Owner read-only. Nobody else gets access, matching the private vault.
+fn make_read_only(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o400)).map_err(|e| CoreError::io(path, e))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut perms = fs::metadata(path).map_err(|e| CoreError::io(path, e))?.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(path, perms).map_err(|e| CoreError::io(path, e))
+    }
+}
+
+/// Add the owner's write bit and nothing else, so a private source never becomes group or world readable.
 fn make_user_writable(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o644)).map_err(|e| CoreError::io(path, e))
+        let mode = fs::metadata(path).map_err(|e| CoreError::io(path, e))?.permissions().mode();
+        fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o200))
+            .map_err(|e| CoreError::io(path, e))
     }
     #[cfg(not(unix))]
     {
@@ -410,5 +426,20 @@ mod tests {
         repo::set_current_location(e.store.conn(), &item, renamed.to_str().unwrap(), &key, 9).unwrap();
         let d = dest(&e);
         assert_eq!(export(&mut e, &item, &v, &d).unwrap().destination, d.join("final.docx"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_users_copy_is_private_to_the_owner_like_the_vault() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut e = Env::new();
+        let (item, v, _) = marked(&mut e, "secret.docx", b"x");
+        let d = dest(&e);
+        let r = export(&mut e, &item, &v, &d).unwrap();
+        let mode = fs::metadata(&r.destination).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "group/other bits set: {mode:o}");
+        assert_ne!(mode & 0o200, 0, "owner must be able to write: {mode:o}");
+        let mat = fs::metadata(&r.materialized).unwrap().permissions().mode();
+        assert_eq!(mat & 0o277, 0, "materialisation must be owner read-only: {mat:o}");
     }
 }

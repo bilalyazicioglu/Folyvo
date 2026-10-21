@@ -29,6 +29,7 @@ impl Cas {
             let p = root.join(sub);
             fs::create_dir_all(&p).map_err(|e| CoreError::io(&p, e))?;
         }
+        restrict_to_owner(root)?;
         Ok(Cas { root: root.to_path_buf() })
     }
 
@@ -189,6 +190,18 @@ impl Cas {
     }
 }
 
+/// The vault holds private documents: nobody but the owner may enter its directory.
+#[cfg(unix)]
+fn restrict_to_owner(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|e| CoreError::io(dir, e))
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_dir: &Path) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(unix)]
 fn sync_dir(dir: &Path) {
     if let Ok(f) = File::open(dir) {
@@ -346,5 +359,14 @@ mod tests {
     fn root_returns_the_directory_it_was_opened_with() {
         let (dir, cas) = cas();
         assert_eq!(cas.root(), dir.path().join("vault"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_vault_directory_is_private_to_the_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, _cas) = cas();
+        let mode = fs::metadata(dir.path().join("vault")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
     }
 }
