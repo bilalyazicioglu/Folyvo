@@ -1,5 +1,5 @@
 import type { VersionDto } from "../generated/VersionDto";
-import { ago, bandHeight, bandOf, noteOf } from "../strata";
+import { Band } from "./Band";
 
 interface Props {
   versions: VersionDto[];
@@ -12,15 +12,8 @@ export function Strata({ versions, now, limit }: Props) {
   return (
     <ol className="strata" aria-label="Versions, newest first">
       {shown.map((v, i) => (
-        <li key={v.id} className={`band band--${bandOf(v, i)}`} style={{ height: bandHeight(v.size) }}>
-          <span className="band__seq">v{v.seq}</span>
-          <span className="band__note">{noteOf(v)}</span>
-          {v.isShareReady && (
-            <span className="band__chip">
-              <span aria-hidden="true">✓</span> Ready to share
-            </span>
-          )}
-          <span className="band__time">{ago(v.createdAt, now)}</span>
+        <li key={v.id} className="strata__item">
+          <Band version={v} index={i} now={now} />
         </li>
       ))}
     </ol>
