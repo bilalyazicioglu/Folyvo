@@ -48,7 +48,13 @@ export const api = {
   reveal: (path: string) => call<void>("reveal", { path }),
   /** Native folder picker. Resolves to null when the person cancels. */
   chooseFolder: async (title: string): Promise<string | null> => {
-    const picked = await open({ directory: true, multiple: false, title });
-    return typeof picked === "string" ? picked : null;
+    // The picker takes focus from the popover, which would hide it and the picker with it.
+    await call<void>("set_dialog_open", { open: true });
+    try {
+      const picked = await open({ directory: true, multiple: false, title });
+      return typeof picked === "string" ? picked : null;
+    } finally {
+      await call<void>("set_dialog_open", { open: false });
+    }
   },
 };

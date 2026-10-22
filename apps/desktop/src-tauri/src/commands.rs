@@ -86,6 +86,15 @@ pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
     crate::tray::open_panel(&app, &item).map_err(|_| UserError::internal())
 }
 
+/// The UI tells the shell while a native dialog is open, so losing focus does not hide the popover.
+#[tauri::command]
+pub fn set_dialog_open(
+    gate: tauri::State<'_, std::sync::Arc<std::sync::Mutex<crate::toggle::ToggleGate>>>,
+    open: bool,
+) {
+    gate.lock().unwrap().set_dialog_open(open);
+}
+
 #[tauri::command]
 pub fn hide_popover(app: AppHandle) {
     if let Some(w) = app.get_webview_window("popover") {

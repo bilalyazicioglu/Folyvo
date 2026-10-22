@@ -141,6 +141,15 @@ test("the first launch shows the invitation and adding a folder starts watching 
   expect(b.called("add_folder")[0].args).toEqual({ path: "/Users/a/Client work" });
 });
 
+test("the popover is told to stay put while the folder picker is open, and again afterwards", async () => {
+  const b = mockBackend({ folders: [], recent: [], picked: null });
+  b.state.handlers.set_dialog_open = () => undefined;
+  renderWithClient(<Popover />);
+  await userEvent.click(await screen.findByRole("button", { name: "Choose folder" }));
+  await waitFor(() => expect(b.called("set_dialog_open")).toHaveLength(2));
+  expect(b.called("set_dialog_open").map((c) => c.args)).toEqual([{ open: true }, { open: false }]);
+});
+
 test("a watched folder with no saved files yet says it is waiting", async () => {
   mockBackend({ recent: [] });
   renderWithClient(<Popover />);

@@ -37,12 +37,14 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
         .build()?;
 
     let gate = std::sync::Arc::new(Mutex::new(ToggleGate::new(300)));
+    app.manage(gate.clone());
     let blur_gate = gate.clone();
     let hider = popover.clone();
     popover.on_window_event(move |event| {
         if let WindowEvent::Focused(false) = event {
-            blur_gate.lock().unwrap().on_blur(now_ms());
-            let _ = hider.hide();
+            if blur_gate.lock().unwrap().on_blur(now_ms()) {
+                let _ = hider.hide();
+            }
         }
     });
 
