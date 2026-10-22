@@ -39,6 +39,7 @@ pub fn run() {
             commands::remove_folder,
             commands::open_history,
             commands::hide_popover,
+            commands::set_dialog_open,
             commands::reveal,
         ])
         .setup(|app| {

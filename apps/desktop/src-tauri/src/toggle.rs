@@ -11,15 +11,26 @@ pub enum TrayAction {
 pub struct ToggleGate {
     cooldown_ms: i64,
     hidden_by_blur_at: Option<i64>,
+    dialog_open: bool,
 }
 
 impl ToggleGate {
     pub fn new(cooldown_ms: i64) -> Self {
-        Self { cooldown_ms, hidden_by_blur_at: None }
+        Self { cooldown_ms, hidden_by_blur_at: None, dialog_open: false }
     }
 
-    pub fn on_blur(&mut self, now_ms: i64) {
+    /// The native folder picker takes focus while it is open; the popover must not hide then.
+    pub fn set_dialog_open(&mut self, open: bool) {
+        self.dialog_open = open;
+    }
+
+    /// Returns whether the popover should hide.
+    pub fn on_blur(&mut self, now_ms: i64) -> bool {
+        if self.dialog_open {
+            return false;
+        }
         self.hidden_by_blur_at = Some(now_ms);
+        true
     }
 
     pub fn on_tray_click(&mut self, now_ms: i64, visible: bool) -> TrayAction {
@@ -63,5 +74,24 @@ mod tests {
         let mut g = ToggleGate::new(300);
         g.on_blur(1_000);
         assert_eq!(g.on_tray_click(1_500, false), TrayAction::Show);
+    }
+
+    // The native folder picker takes focus from the popover. Hiding it then would take the
+    // picker's window with it.
+    #[test]
+    fn a_blur_while_a_dialog_is_open_keeps_the_popover() {
+        let mut g = ToggleGate::new(300);
+        g.set_dialog_open(true);
+        assert!(!g.on_blur(1_000), "the popover stays");
+        g.set_dialog_open(false);
+        assert!(g.on_blur(2_000), "after the dialog closes a blur hides it again");
+    }
+
+    #[test]
+    fn a_blur_that_kept_the_popover_does_not_swallow_the_next_tray_click() {
+        let mut g = ToggleGate::new(300);
+        g.set_dialog_open(true);
+        g.on_blur(1_000);
+        assert_eq!(g.on_tray_click(1_100, false), TrayAction::Show);
     }
 }

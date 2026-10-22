@@ -67,6 +67,7 @@ export function demoHandlers() {
     "plugin:dialog|open": (_: Args) => "/Users/you/Sent",
     open_history: (_: Args) => undefined,
     hide_popover: (_: Args) => undefined,
+    set_dialog_open: (_: Args) => undefined,
     reveal: (_: Args) => undefined,
     add_folder: (_: Args) => undefined,
     remove_folder: (_: Args) => undefined,
