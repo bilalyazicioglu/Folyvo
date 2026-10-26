@@ -25,6 +25,12 @@ pub async fn recent(rt: Rt<'_>, limit: u32) -> Result<Vec<ItemSummaryDto>, UserE
 }
 
 #[tauri::command]
+pub async fn item(rt: Rt<'_>, item: String) -> Result<ItemSummaryDto, UserError> {
+    let api = rt.api();
+    blocking(move || api.item(&item)).await
+}
+
+#[tauri::command]
 pub async fn history(rt: Rt<'_>, item: String) -> Result<Vec<VersionDto>, UserError> {
     let api = rt.api();
     blocking(move || api.history(&item)).await

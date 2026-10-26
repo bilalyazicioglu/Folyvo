@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, AppError, INTERNAL_ERROR } from "../api";
 import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -40,7 +40,15 @@ export function Popover() {
   const recent = useRecent();
   const activity = useActivity(from, to);
   const act = useAction();
-  const root = useRef<HTMLElement>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+  // A callback ref: the loading shell and the loaded popover are different elements, and both must be watched.
+  const root = useCallback((el: HTMLElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    observer.current = new ResizeObserver(() => void api.fitPopover(el.getBoundingClientRect().height));
+    observer.current.observe(el);
+  }, []);
   const [openId, setOpenId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [dropped, setDropped] = useState<Dropped | null>(null);
@@ -62,21 +70,13 @@ export function Popover() {
     return () => void stop.then((f) => f());
   }, []);
 
-  useEffect(() => {
-    const el = root.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => void api.fitPopover(el.getBoundingClientRect().height));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const addFolder = async () => {
     const picked = await api.chooseFolder("Choose a folder to watch");
     if (picked) await act.run(() => api.addFolder(picked));
   };
   const removeFolder = (path: string) => void act.run(() => api.removeFolder(path));
 
-  if (folders.isPending || recent.isPending) return <main className="popover" aria-busy="true" aria-label="Folyvo" />;
+  if (folders.isPending || recent.isPending) return <main className="popover" aria-busy="true" aria-label="Folyvo" ref={root} />;
 
   const folderList = folders.data ?? [];
   const items = recent.data ?? [];

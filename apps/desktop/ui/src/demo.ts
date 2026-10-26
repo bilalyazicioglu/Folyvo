@@ -55,6 +55,7 @@ export function demoHandlers() {
 
   return {
     recent: (_: Args) => recentOf(),
+    item: (a: Args) => recentOf().find((i) => i.itemId === a.item),
     history: (a: Args) => byId(a),
     stats: (_: Args) => ({ items: 3, versions: 17, bytes: 21_400_000 }),
     folders: (_: Args) => [{ path: "/Users/you/Client work", problem: null }],

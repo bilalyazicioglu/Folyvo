@@ -376,6 +376,11 @@ impl Engine {
         repo::recent_items(g.store.conn(), limit)?.iter().map(|i| Self::summarize(&g, i)).collect()
     }
 
+    /// One item's summary, found by id; `ItemMissing` when there is none.
+    pub fn item(&self, item: &ItemId) -> Result<ItemSummary> {
+        Self::summarize(&self.lock(), item)
+    }
+
     pub fn history(&self, item: &ItemId) -> Result<Vec<VersionView>> {
         let g = self.lock();
         let c = g.store.conn();
@@ -568,6 +573,16 @@ mod tests {
             copies.iter().map(|c| c.service.clone()).collect::<Vec<_>>(),
             vec![Some("mail".to_string())]
         );
+    }
+
+    #[test]
+    fn item_is_found_by_its_id_however_many_items_exist() {
+        let mut t = setup();
+        let p = t.file("Teklif.docx", b"one");
+        let v = t.save(&p, b"one");
+        let s = t.engine.item(&v.item_id).unwrap();
+        assert_eq!((s.name.as_str(), s.latest_seq, s.missing), ("Teklif.docx", 1, false));
+        assert!(matches!(t.engine.item(&ItemId::parse("itm_0f0f").unwrap()), Err(CoreError::ItemMissing)));
     }
 
     #[test]

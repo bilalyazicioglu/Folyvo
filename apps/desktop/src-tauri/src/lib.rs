@@ -31,6 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::recent,
+            commands::item,
             commands::history,
             commands::name_version,
             commands::export,

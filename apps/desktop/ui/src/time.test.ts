@@ -38,3 +38,11 @@ test("long turkish names are cut in the middle keeping the extension", () => {
   expect(middleTruncate("Teklif_Müşteri_2026_son_hâli.docx", 30)).toBe("Teklif_Müşteri_2026_…hâli.docx");
   expect(middleTruncate("Budget_2027.xlsx", 30)).toBe("Budget_2027.xlsx");
 });
+
+test("a name whose last dot does not start an extension is still cut to size", () => {
+  const name = "Report 2026.final version of the client proposal for Acme";
+  const cut = middleTruncate(name, 30);
+  expect([...cut]).toHaveLength(30);
+  expect(cut.startsWith("Report 2026.final")).toBe(true);
+  expect(cut.endsWith("Acme")).toBe(true);
+});

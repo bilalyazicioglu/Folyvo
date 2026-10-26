@@ -44,6 +44,7 @@ export type DropEvent = { type: "over" } | { type: "leave" } | { type: "drop"; p
 
 export const api = {
   recent: (limit = 20) => call<ItemSummaryDto[]>("recent", { limit }),
+  item: (item: string) => call<ItemSummaryDto>("item", { item }),
   history: (item: string) => call<VersionDto[]>("history", { item }),
   nameVersion: (version: string, note: string | null) => call<void>("name_version", { version, note }),
   exportVersion: (item: string, version: string, destDir: string) => call<ExportDto>("export", { item, version, destDir }),

@@ -4,6 +4,7 @@ import { api, AppError, INTERNAL_ERROR } from "./api";
 import type { UserError } from "./generated/UserError";
 
 export const useRecent = () => useQuery({ queryKey: ["recent"], queryFn: () => api.recent(200) });
+export const useItem = (item: string) => useQuery({ queryKey: ["item", item], queryFn: () => api.item(item) });
 export const useHistory = (item?: string) =>
   useQuery({ queryKey: ["history", item], queryFn: () => api.history(item!), enabled: !!item });
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: api.stats });
@@ -12,7 +13,7 @@ export const useActivity = (from: number, to: number) =>
   useQuery({ queryKey: ["activity", from, to], queryFn: () => api.activity(from, to) });
 /** A version's picture never changes, so it is drawn once per window. */
 export const usePreview = (item: string, version?: string) =>
-  useQuery({ queryKey: ["preview", item, version], queryFn: () => api.preview(item, version!), enabled: !!version, staleTime: Infinity });
+  useQuery({ queryKey: ["preview", item, version], queryFn: () => api.preview(item, version!), enabled: !!version, staleTime: Infinity, retry: false });
 export const useCopies = (item?: string) =>
   useQuery({ queryKey: ["copies", item], queryFn: () => api.copies(item!), enabled: !!item });
 
