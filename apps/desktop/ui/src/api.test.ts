@@ -16,12 +16,12 @@ test("commands pass camelCase arguments and return the backend's data", async ()
 
 test("a typed backend error becomes an AppError with its title and hint", async () => {
   mockIPC(() => {
-    throw { code: "share_ready_changed", title: "The ready version changed", hint: "Look at the current ready version and export again." };
+    throw { code: "version_missing", title: "That version isn't there", hint: "Open the history again and pick another version." };
   });
-  const err = await api.markReady("itm_01", "ver_01").catch((e) => e);
+  const err = await api.exportVersion("itm_01", "ver_01", "/tmp").catch((e) => e);
   expect(err).toBeInstanceOf(AppError);
-  expect(err.info.code).toBe("share_ready_changed");
-  expect(err.info.hint).toContain("export again");
+  expect(err.info.code).toBe("version_missing");
+  expect(err.info.hint).toContain("history again");
 });
 
 test("anything that is not a typed error becomes the generic message", async () => {

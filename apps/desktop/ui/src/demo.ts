@@ -17,13 +17,12 @@ export function demoHandlers() {
     contentHash: `b3_${seq}`,
     origin: "auto",
     note: null,
-    isShareReady: false,
     ...extra,
   });
   const histories: Record<string, VersionDto[]> = {
     itm_demo1: [
       v(9, 2, 412_000),
-      v(8, 95, 398_000, { note: "Sent to Acme for review", isShareReady: true }),
+      v(8, 95, 398_000, { note: "Sent to Acme for review" }),
       v(7, 140, 301_000),
       v(6, 300, 196_000, { note: "Pricing section added" }),
       v(5, 1_500, 88_000),
@@ -36,9 +35,7 @@ export function demoHandlers() {
   const recentOf = (): ItemSummaryDto[] =>
     Object.keys(histories).map((id) => {
       const h = histories[id];
-      const ready = h.find((x) => x.isShareReady);
-      const status = !ready ? "notShared" : ready.contentHash === h[0].contentHash ? "ready" : "changedSinceReady";
-      return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, status, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false };
+      return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false };
     });
   const byId = (a: Args) => histories[a.item as string] ?? [];
 
@@ -50,19 +47,14 @@ export function demoHandlers() {
     name_version: (a: Args) => {
       for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.note = (a.note as string | null) ?? null; });
     },
-    mark_ready: (a: Args) => {
-      byId(a).forEach((x) => { x.isShareReady = x.id === a.version; });
-    },
     export: (a: Args) => {
-      const ready = byId(a).find((x) => x.isShareReady);
-      if (!ready) throw { code: "share_ready_missing", title: "Nothing is marked ready to share", hint: "Mark a version as ready first, then export it." };
-      return { destination: `${a.destDir}/${names[a.item as string]}`, versionId: ready.id };
+      return { destination: `${a.destDir}/${names[a.item as string]}`, versionId: a.version as string };
     },
     restore: (a: Args) => {
       const h = byId(a);
       const source = h.find((x) => x.id === a.version)!;
       const seq = h[0].seq + 1;
-      h.unshift({ ...source, id: `ver_${seq.toString(16).padStart(2, "0")}`, seq, createdAt: Date.now(), origin: "restore", note: null, isShareReady: false });
+      h.unshift({ ...source, id: `ver_${seq.toString(16).padStart(2, "0")}`, seq, createdAt: Date.now(), origin: "restore", note: null });
       return { versionId: h[0].id, seq };
     },
     "plugin:dialog|open": (_: Args) => "/Users/you/Sent",

@@ -33,7 +33,7 @@ impl WatchLoop {
     }
 
     pub fn record(&mut self, path: &Path, event: FsEvent) {
-        let known = matches!(self.engine.item_status(path), Ok(Some(_)));
+        let known = self.engine.is_tracked(path);
         self.debouncer.record(path, event, self.clock.now_unix_ms(), known);
     }
 
@@ -64,7 +64,7 @@ impl WatchLoop {
     /// Only a file Folyvo is tracking can go missing. Editors create and delete scratch files all
     /// the time; those were never versioned and must not be reported.
     fn vanished(&self, path: PathBuf) -> Applied {
-        if !matches!(self.engine.item_status(&path), Ok(Some(_))) {
+        if !self.engine.is_tracked(&path) {
             return Applied::Skipped { path };
         }
         match self.engine.mark_missing(&path) {

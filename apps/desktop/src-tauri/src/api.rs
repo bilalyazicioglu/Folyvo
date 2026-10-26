@@ -41,11 +41,6 @@ impl AppApi {
         Ok(self.engine.name_version(&version, note.as_deref())?)
     }
 
-    pub fn mark_ready(&self, item: &str, version: &str) -> Result<(), UserError> {
-        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
-        Ok(self.engine.mark_share_ready(&item, &version)?)
-    }
-
     pub fn export(&self, item: &str, expected: &str, dest_dir: &str) -> Result<ExportDto, UserError> {
         let (item, expected) = (ItemId::parse(item)?, VersionId::parse(expected)?);
         Ok(self.engine.export(&item, &expected, Path::new(dest_dir))?.into())
@@ -64,7 +59,6 @@ impl AppApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::StatusDto;
     use folyvo_core::ports::{FakeClock, SeqIdGen};
     use std::fs;
     use std::path::PathBuf;
@@ -106,30 +100,25 @@ mod tests {
     }
 
     #[test]
-    fn recent_lists_the_newest_file_first_with_its_status() {
+    fn recent_lists_the_newest_file_first() {
         let r = rig();
         r.save("a.docx", b"one");
         r.engine.ingest_path(&r.dir.path().join("work/a.docx")).unwrap();
         let recent = r.api.recent(10).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].name, "a.docx");
-        assert_eq!(recent[0].status, StatusDto::NotShared);
         assert_eq!(recent[0].latest_seq, 1);
     }
 
     #[test]
-    fn history_is_newest_first_and_marks_the_ready_version() {
+    fn history_is_newest_first() {
         let r = rig();
         let p = r.save("a.docx", b"one");
         fs::write(&p, b"two").unwrap();
         r.engine.ingest_path(&p).unwrap();
         let item = r.item();
-        let v1 = r.api.history(&item).unwrap()[1].id.clone();
-        r.api.mark_ready(&item, &v1).unwrap();
         let h = r.api.history(&item).unwrap();
         assert_eq!(h.iter().map(|v| v.seq).collect::<Vec<_>>(), vec![2, 1]);
-        assert_eq!(h.iter().map(|v| v.is_share_ready).collect::<Vec<_>>(), vec![false, true]);
-        assert_eq!(r.api.recent(10).unwrap()[0].status, StatusDto::ChangedSinceReady);
     }
 
     #[test]
@@ -177,7 +166,7 @@ mod tests {
         let r = rig();
         assert_eq!(r.api.history("nonsense").unwrap_err().code, "bad_request");
         assert_eq!(r.api.history("itm_00ff").unwrap_err().code, "item_missing");
-        assert_eq!(r.api.mark_ready("itm_00ff", "ver_00ff").unwrap_err().code, "item_missing");
+        assert_eq!(r.api.export("itm_00ff", "ver_00ff", &r.out()).unwrap_err().code, "item_missing");
     }
 
     #[test]

@@ -30,7 +30,6 @@ pub fn run() {
             commands::recent,
             commands::history,
             commands::name_version,
-            commands::mark_ready,
             commands::export,
             commands::restore,
             commands::stats,

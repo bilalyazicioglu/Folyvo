@@ -201,8 +201,8 @@ fn copy_no_clobber(src: &Path, dest_dir: &Path, name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::share_events;
     use crate::model::ShareEventKind;
-    use crate::share::share_events;
     use crate::store::repo;
     use crate::testutil::Env;
     use std::fs;

@@ -137,22 +137,6 @@ pub(crate) fn display_name(c: &Connection, item: &ItemId) -> Result<Option<Strin
         .optional()?)
 }
 
-pub(crate) fn share_ready_version(c: &Connection, item: &ItemId) -> Result<Option<VersionId>> {
-    let id: Option<String> = c
-        .query_row("SELECT version_id FROM share_ready WHERE item_id = ?1", [item.as_str()], |r| r.get(0))
-        .optional()?;
-    id.map(|s| VersionId::parse(&s).map_err(|e| CoreError::Corrupt(e.to_string()))).transpose()
-}
-
-pub(crate) fn set_share_ready(c: &Connection, item: &ItemId, version: &VersionId, now: i64) -> Result<()> {
-    c.execute(
-        "INSERT INTO share_ready(item_id, version_id, marked_at) VALUES (?1, ?2, ?3) \
-         ON CONFLICT(item_id) DO UPDATE SET version_id = excluded.version_id, marked_at = excluded.marked_at",
-        params![item.as_str(), version.as_str(), now],
-    )?;
-    Ok(())
-}
-
 pub(crate) fn insert_event(c: &Connection, e: &ShareEvent, target_key: Option<&str>) -> Result<()> {
     c.execute(
         "INSERT INTO share_events(item_id, version_id, kind, target_path, target_key, at) \

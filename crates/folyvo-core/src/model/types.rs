@@ -40,16 +40,6 @@ pub struct Version {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ItemStatus {
-    /// No share-ready version has been chosen yet.
-    NotShared,
-    /// The share-ready version is also the latest version.
-    Ready,
-    /// A newer version exists than the share-ready one.
-    ChangedSinceReady,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShareEventKind {
     Marked,
     Exported,

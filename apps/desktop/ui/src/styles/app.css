@@ -30,12 +30,10 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .strata { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .band { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 3px; font-size: 13px; color: var(--layer-ink); transition: height 160ms ease; }
 .band--latest { background: var(--amber); color: var(--amber-ink); }
-.band--ready { background: var(--ready); color: var(--ready-ink); }
 .band--older-a { background: var(--layer-a); }
 .band--older-b { background: var(--layer-b); }
 .band__seq { width: 26px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .band__note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.band__chip { padding: 2px 8px; border-radius: 10px; background: rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .band__time { font-size: 12px; opacity: 0.9; white-space: nowrap; }
 
 .section-title { margin: 14px 4px 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -75,8 +73,6 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .name-field { display: flex; gap: 8px; align-items: center; }
 .name-field input { flex: 1; min-height: 44px; padding: 0 10px; border: 1px solid #9aa59f; border-radius: 6px; font: inherit; }
 
-.band--just-marked { animation: marked 600ms ease-out 1; }
-@keyframes marked { 0% { box-shadow: inset 0 0 0 0 rgb(255 255 255 / 0.9); transform: scaleX(0.96); } 60% { box-shadow: inset 0 0 0 28px rgb(255 255 255 / 0); transform: scaleX(1); } 100% { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) {
-  .band, .band--just-marked { animation: none; transition: none; }
+  .band { animation: none; transition: none; }
 }

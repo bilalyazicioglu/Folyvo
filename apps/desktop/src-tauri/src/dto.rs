@@ -1,27 +1,8 @@
 use folyvo_core::engine::{EngineEvent, ItemSummary, VaultStats, VersionView};
 use folyvo_core::export::ExportResult;
-use folyvo_core::model::{ItemStatus, Version, VersionOrigin};
+use folyvo_core::model::{Version, VersionOrigin};
 use serde::Serialize;
 use ts_rs::TS;
-
-#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub enum StatusDto {
-    NotShared,
-    Ready,
-    ChangedSinceReady,
-}
-
-impl From<ItemStatus> for StatusDto {
-    fn from(s: ItemStatus) -> Self {
-        match s {
-            ItemStatus::NotShared => StatusDto::NotShared,
-            ItemStatus::Ready => StatusDto::Ready,
-            ItemStatus::ChangedSinceReady => StatusDto::ChangedSinceReady,
-        }
-    }
-}
 
 #[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +30,6 @@ pub struct ItemSummaryDto {
     pub item_id: String,
     pub name: String,
     pub path: Option<String>,
-    pub status: StatusDto,
     #[ts(type = "number")]
     pub latest_seq: i64,
     #[ts(type = "number")]
@@ -63,7 +43,6 @@ impl From<ItemSummary> for ItemSummaryDto {
             item_id: s.item_id.to_string(),
             name: s.name,
             path: s.path,
-            status: s.status.into(),
             latest_seq: s.latest_seq,
             latest_at: s.latest_at,
             missing: s.missing,
@@ -85,7 +64,6 @@ pub struct VersionDto {
     pub content_hash: String,
     pub origin: OriginDto,
     pub note: Option<String>,
-    pub is_share_ready: bool,
     pub code: String,
 }
 
@@ -99,7 +77,6 @@ impl From<VersionView> for VersionDto {
             content_hash: v.content_hash.to_string(),
             origin: v.origin.into(),
             note: v.note,
-            is_share_ready: v.is_share_ready,
             code: v.code,
         }
     }
@@ -163,9 +140,6 @@ pub enum EngineEventDto {
         item_id: String,
         version_id: String,
     },
-    ShareReadyChanged {
-        item_id: String,
-    },
     Exported {
         item_id: String,
         destination: String,
@@ -186,9 +160,6 @@ impl From<EngineEvent> for EngineEventDto {
         match e {
             EngineEvent::VersionCreated { item, version } => {
                 EngineEventDto::VersionCreated { item_id: item.to_string(), version_id: version.to_string() }
-            }
-            EngineEvent::ShareReadyChanged { item } => {
-                EngineEventDto::ShareReadyChanged { item_id: item.to_string() }
             }
             EngineEvent::Exported { item, destination } => EngineEventDto::Exported {
                 item_id: item.to_string(),
@@ -215,15 +186,8 @@ mod tests {
     use super::*;
     use folyvo_core::engine::EngineEvent;
     use folyvo_core::engine::VersionView;
-    use folyvo_core::model::{ContentHash, ItemId, ItemStatus, VersionId, VersionOrigin};
+    use folyvo_core::model::{ContentHash, ItemId, VersionId, VersionOrigin};
     use serde_json::json;
-
-    #[test]
-    fn status_serialises_in_camel_case() {
-        assert_eq!(serde_json::to_value(StatusDto::ChangedSinceReady).unwrap(), json!("changedSinceReady"));
-        assert_eq!(StatusDto::from(ItemStatus::Ready), StatusDto::Ready);
-        assert_eq!(StatusDto::from(ItemStatus::NotShared), StatusDto::NotShared);
-    }
 
     #[test]
     fn a_version_keeps_every_field_the_ui_needs() {
@@ -235,7 +199,6 @@ mod tests {
             content_hash: ContentHash::of_bytes(b"x"),
             origin: VersionOrigin::Restore,
             note: Some("Sent to Acme".into()),
-            is_share_ready: true,
             code: "0a".into(),
         };
         let json = serde_json::to_value(VersionDto::from(v)).unwrap();
@@ -244,7 +207,6 @@ mod tests {
         assert_eq!(json["createdAt"], 1_700_000_000_000i64);
         assert_eq!(json["origin"], "restore");
         assert_eq!(json["note"], "Sent to Acme");
-        assert_eq!(json["isShareReady"], true);
         assert_eq!(json["code"], "0a");
     }
 

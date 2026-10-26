@@ -21,10 +21,6 @@ pub enum CoreError {
     NotAFile(PathBuf),
     #[error("database error: {0}")]
     Db(#[from] rusqlite::Error),
-    #[error("this file has no share-ready version yet")]
-    ShareReadyMissing,
-    #[error("the share-ready version changed from {expected} to {actual}")]
-    ShareReadyChanged { expected: VersionId, actual: VersionId },
     #[error("item not found")]
     ItemMissing,
     #[error("this file has no version v{0}")]
@@ -52,17 +48,6 @@ impl CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn share_ready_changed_message_tells_the_user_what_happened() {
-        let e = CoreError::ShareReadyChanged {
-            expected: VersionId::from_suffix("08"),
-            actual: VersionId::from_suffix("09"),
-        };
-        let msg = e.to_string();
-        assert!(msg.contains("share-ready"), "{msg}");
-        assert!(msg.contains("ver_08") && msg.contains("ver_09"), "{msg}");
-    }
 
     #[test]
     fn io_error_names_the_path() {

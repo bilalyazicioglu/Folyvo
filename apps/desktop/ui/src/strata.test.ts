@@ -1,5 +1,5 @@
 import { version } from "./test-utils";
-import { ago, bandHeight, bandOf, changedSince, exportLabel, folderName, markLabel, MAX_BAND, MIN_BAND, noteOf, sizeLabel, storedLabel } from "./strata";
+import { ago, bandHeight, bandOf, exportLabel, folderName, MAX_BAND, MIN_BAND, noteOf, sizeLabel, storedLabel } from "./strata";
 
 test("thickness grows with file size on a log scale and stays inside its limits", () => {
   expect(bandHeight(0)).toBe(MIN_BAND);
@@ -38,13 +38,9 @@ test("a version without a name is described by how it came about", () => {
 
 test("buttons and sentences name the version they are about", () => {
   expect(exportLabel(8)).toBe("Export v8");
-  expect(markLabel(9)).toBe("Mark v9 ready");
-  expect(changedSince(8)).toBe("Changed since v8, your share-ready version.");
 });
 
-test("band kinds: ready wins, then the latest, then alternating older layers", () => {
-  expect(bandOf(version({ isShareReady: true }), 0)).toBe("ready");
-  expect(bandOf(version({ isShareReady: true }), 3)).toBe("ready");
+test("band kinds: the latest, then alternating older layers", () => {
   expect(bandOf(version(), 0)).toBe("latest");
   expect(bandOf(version(), 1)).toBe("older-a");
   expect(bandOf(version(), 2)).toBe("older-b");

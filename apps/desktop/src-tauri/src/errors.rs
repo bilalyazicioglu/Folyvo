@@ -54,16 +54,6 @@ impl From<IdError> for UserError {
 impl From<CoreError> for UserError {
     fn from(e: CoreError) -> Self {
         match e {
-            CoreError::ShareReadyMissing => Self::new(
-                "share_ready_missing",
-                "Nothing is marked ready to share",
-                "Mark a version as ready first, then export it.",
-            ),
-            CoreError::ShareReadyChanged { .. } => Self::new(
-                "share_ready_changed",
-                "The ready version changed",
-                "Look at the current ready version and export again.",
-            ),
             CoreError::ItemMissing => Self::new(
                 "item_missing",
                 "Folyvo can't find this file",
@@ -133,11 +123,6 @@ mod tests {
     #[test]
     fn each_core_error_has_a_stable_code() {
         let v = VersionId::from_suffix("01");
-        assert_eq!(code(CoreError::ShareReadyMissing), "share_ready_missing");
-        assert_eq!(
-            code(CoreError::ShareReadyChanged { expected: v.clone(), actual: VersionId::from_suffix("02") }),
-            "share_ready_changed"
-        );
         assert_eq!(code(CoreError::ItemMissing), "item_missing");
         assert_eq!(code(CoreError::VersionMissing(v)), "version_missing");
         assert_eq!(code(CoreError::NoSuchVersionNumber(9)), "version_missing");
@@ -170,7 +155,6 @@ mod tests {
     #[test]
     fn nothing_technical_leaks_and_the_style_holds() {
         let samples = vec![
-            CoreError::ShareReadyMissing,
             CoreError::ItemMissing,
             CoreError::Corrupt("table versions has no row".into()),
             CoreError::Watch("inotify limit".into()),

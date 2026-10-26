@@ -4,8 +4,8 @@ import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
 import { Strata } from "../components/Strata";
-import { useAction, useFolders, useHistory, useJustMarked, useNow, useRecent, useStats } from "../queries";
-import { ago, changedSince, exportLabel, folderName, markLabel, storedLabel } from "../strata";
+import { useAction, useFolders, useHistory, useNow, useRecent, useStats } from "../queries";
+import { ago, exportLabel, folderName, storedLabel } from "../strata";
 
 interface Notice {
   text: string;
@@ -25,7 +25,6 @@ export function Popover() {
   const history = useHistory(current?.itemId);
   const act = useAction();
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [justMarked, setJustMarked] = useJustMarked();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,23 +46,13 @@ export function Popover() {
   const items = recent.data ?? [];
   const versions = history.data ?? [];
   const latest = versions[0];
-  const ready = versions.find((v) => v.isShareReady);
 
-  const markLatest = async () => {
+  const exportLatest = async () => {
     if (!current || !latest) return;
-    const r = await act.run(() => api.markReady(current.itemId, latest.id));
-    if (r.ok) {
-      setNotice({ text: `v${latest.seq} is ready to share` });
-      setJustMarked(latest.id);
-    }
-  };
-
-  const exportReady = async () => {
-    if (!current || !ready) return;
     const dir = await api.chooseFolder("Choose where to put the copy");
     if (!dir) return;
-    const r = await act.run(() => api.exportVersion(current.itemId, ready.id, dir));
-    if (r.ok) setNotice({ text: `Exported v${ready.seq}`, reveal: r.value.destination });
+    const r = await act.run(() => api.exportVersion(current.itemId, latest.id, dir));
+    if (r.ok) setNotice({ text: `Exported v${latest.seq}`, reveal: r.value.destination });
   };
 
   return (
@@ -103,34 +92,13 @@ export function Popover() {
               {current.missing && (
                 <p className="card__status">This file was removed from its folder. Its versions are still saved.</p>
               )}
-              <Strata versions={versions} now={now} limit={4} justMarkedId={justMarked ?? undefined} />
+              <Strata versions={versions} now={now} limit={4} />
               {!current.missing && latest && (
-                <>
-                  <p className="card__status">
-                    {current.status === "notShared" || !ready
-                      ? "Not shared yet. Mark a version ready when you are happy with it."
-                      : current.status === "ready"
-                        ? `v${ready.seq} is ready to share.`
-                        : changedSince(ready.seq)}
-                  </p>
-                  <div className="card__actions">
-                    {ready && (
-                      <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void exportReady()}>
-                        {exportLabel(ready.seq)}
-                      </button>
-                    )}
-                    {(!ready || current.status === "changedSinceReady") && (
-                      <button
-                        type="button"
-                        className={ready ? "btn btn--secondary" : "btn btn--primary"}
-                        disabled={act.busy}
-                        onClick={() => void markLatest()}
-                      >
-                        {markLabel(latest.seq)}
-                      </button>
-                    )}
-                  </div>
-                </>
+                <div className="card__actions">
+                  <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void exportLatest()}>
+                    {exportLabel(latest.seq)}
+                  </button>
+                </div>
               )}
               <button type="button" className="btn btn--link" onClick={() => void api.openHistory(current.itemId)}>
                 All versions
