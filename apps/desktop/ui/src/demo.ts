@@ -1,9 +1,20 @@
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import type { CopyDto } from "./generated/CopyDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
 import type { VersionDto } from "./generated/VersionDto";
 
 type Args = Record<string, unknown>;
 const MIN = 60_000;
+
+/** A plain drawn page standing in for a Quick Look picture. */
+const PAGE =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="612" height="792"><rect width="612" height="792" fill="#fff"/>` +
+      `<rect x="72" y="80" width="300" height="22" fill="#1d1d1f"/>` +
+      Array.from({ length: 22 }, (_, i) => `<rect x="72" y="${140 + i * 26}" width="${420 + ((i * 37) % 48)}" height="9" fill="#c9cad0"/>`).join("") +
+      `</svg>`,
+  );
 
 /** An in-memory stand-in for the Rust backend, used for design review and screenshots (`?demo=1`). */
 export function demoHandlers() {
@@ -22,7 +33,7 @@ export function demoHandlers() {
   const histories: Record<string, VersionDto[]> = {
     itm_demo1: [
       v(9, 2, 412_000),
-      v(8, 95, 398_000, { note: "Sent to Acme for review" }),
+      v(8, 95, 398_000, { note: "Before the Acme call" }),
       v(7, 140, 301_000),
       v(6, 300, 196_000, { note: "Pricing section added" }),
       v(5, 1_500, 88_000),
@@ -38,6 +49,9 @@ export function demoHandlers() {
       return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false };
     });
   const byId = (a: Args) => histories[a.item as string] ?? [];
+  const copies: CopyDto[] = [
+    { itemId: "itm_demo1", versionId: "ver_08", kind: "handed", service: "mail", targetPath: null, at: now - 90 * MIN },
+  ];
 
   return {
     recent: (_: Args) => recentOf(),
@@ -51,9 +65,13 @@ export function demoHandlers() {
       saves: Object.entries(histories).flatMap(([itemId, h]) =>
         h.filter((v) => v.createdAt >= (a.from as number) && v.createdAt < (a.to as number)).map((v) => ({ itemId, versionId: v.id, at: v.createdAt })),
       ),
-      copies: [],
+      copies: copies.filter((c) => c.at >= (a.from as number) && c.at < (a.to as number)),
     }),
-    copies: (_: Args) => [],
+    copies: (a: Args) => copies.filter((c) => c.itemId === a.item),
+    preview: (a: Args) => ({
+      picture: a.item === "itm_demo3" ? null : PAGE,
+      appName: a.item === "itm_demo2" ? "Microsoft Excel" : a.item === "itm_demo3" ? null : "Microsoft Word",
+    }),
     item_at: (_: Args) => null,
     which: (_: Args) => [],
     export: (a: Args) => {
@@ -66,9 +84,11 @@ export function demoHandlers() {
       h.unshift({ ...source, id: `ver_${seq.toString(16).padStart(2, "0")}`, seq, createdAt: Date.now(), origin: "restore", note: null });
       return { versionId: h[0].id, seq };
     },
-    "plugin:dialog|open": (_: Args) => "/Users/you/Sent",
+    "plugin:dialog|open": (_: Args) => "/Users/you/Desktop",
     open_history: (_: Args) => undefined,
     hide_popover: (_: Args) => undefined,
+    fit_popover: (_: Args) => undefined,
+    open_version: (_: Args) => undefined,
     set_dialog_open: (_: Args) => undefined,
     reveal: (_: Args) => undefined,
     add_folder: (_: Args) => undefined,
@@ -79,4 +99,5 @@ export function demoHandlers() {
 export function installDemo() {
   const handlers = demoHandlers() as Record<string, (a: Args) => unknown>;
   mockIPC((cmd, payload) => handlers[cmd]?.((payload ?? {}) as Args), { shouldMockEvents: true });
+  mockWindows("demo");
 }

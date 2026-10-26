@@ -4,7 +4,7 @@ import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
 import { useAction, useActivity, useFolders, useNow, useRecent } from "../queries";
-import { folderName } from "../strata";
+import { folderName } from "../files";
 import { dayBounds, hourBuckets } from "../time";
 import { DropResult, type Dropped } from "./DropResult";
 import { FileRow } from "./FileRow";

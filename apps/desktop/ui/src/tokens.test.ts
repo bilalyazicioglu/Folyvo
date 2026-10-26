@@ -30,9 +30,8 @@ const PAIRS = [
   ["muted", "bg"],
   ["muted", "surface"],
   ["accent-ink", "accent"],
-  ["amber-ink", "amber"],
-  ["layer-ink", "layer-a"],
-  ["layer-ink", "layer-b"],
+  ["accent-text", "bg"],
+  ["accent-text", "surface"],
   ["danger", "surface"],
   ["danger", "bg"],
 ];

@@ -8,11 +8,8 @@
   --muted: #5f6168;
   --accent: #1f7a4d;
   --accent-ink: #ffffff;
-  --amber: #d4a35a;
-  --amber-ink: #1d1d1f;
-  --layer-a: #4f625a;
-  --layer-b: #5e7068;
-  --layer-ink: #ffffff;
+  /* Accent as text on the page; brighter in the dark scheme so it still reads. */
+  --accent-text: #1f7a4d;
   --danger: #9b2c2c;
   --focus: #0a60ff;
   --ok: #30b34f;
@@ -31,5 +28,6 @@
     --muted: #aaaab2;
     --danger: #ff9a90;
     --focus: #6aa2ff;
+    --accent-text: #5fd08f;
   }
 }
