@@ -216,3 +216,35 @@ test("Escape closes the popover", async () => {
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(b.called("hide_popover")).toHaveLength(1));
 });
+
+test("the popover asks to fit its content once loaded", async () => {
+  const observed: Element[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private cb: () => void) {}
+      observe(el: Element) {
+        observed.push(el);
+        this.cb();
+      }
+      disconnect() {}
+    },
+  );
+  const b = backend();
+  renderWithClient(<Popover />);
+  await screen.findByRole("heading", { name: "Today" });
+  await waitFor(() => expect(b.called("fit_popover").length).toBeGreaterThan(0));
+  expect(observed.at(-1)).toHaveAttribute("aria-label", "Folyvo");
+  vi.unstubAllGlobals();
+});
+
+test("a row reads out its name and its day, and each dot its time", async () => {
+  backend();
+  renderWithClient(<Popover />);
+  const row = await screen.findByRole("button", { name: LONG });
+  expect(row).toHaveAccessibleDescription("3 saves today, Attached in Mail 10:14");
+  await userEvent.click(row);
+  const open = screen.getByRole("region", { name: `${LONG} today` });
+  await waitFor(() => expect(within(open).getByRole("listitem", { name: "09:58, a copy left" })).toBeInTheDocument());
+  expect(within(open).getByRole("listitem", { name: "10:12" })).toBeInTheDocument();
+});

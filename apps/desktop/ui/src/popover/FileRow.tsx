@@ -36,17 +36,28 @@ export function FileRow({ item, saves, copies, now, start, open, onToggle, onOpe
   const copied = new Set((left.data ?? copies).map((c) => c.versionId));
   const span = Math.max(1, now - start);
   const regionId = `today-${item.itemId}`;
+  const subId = `sub-${item.itemId}`;
   return (
     <li className={`file${open ? " is-open" : ""}`}>
-      <button type="button" className="file__head" aria-label={item.name} aria-expanded={open} aria-controls={regionId} onClick={onToggle}>
+      <button
+        type="button"
+        className="file__head"
+        aria-expanded={open}
+        aria-controls={regionId}
+        aria-describedby={subId}
+        onClick={onToggle}
+      >
         <span className={`tile tile--${fileKind(item.name)}`} aria-hidden="true" />
         <span className="file__text">
-          <span className="file__name" title={item.name}>
+          <span className="sr-only">{item.name}</span>
+          <span className="file__name" title={item.name} aria-hidden="true">
             {middleTruncate(item.name, NAME_MAX)}
           </span>
-          <span className="file__sub">{subLine(item, saves, newestCopy, now)}</span>
+          <span id={subId} className="file__sub" aria-hidden="true">
+            {subLine(item, saves, newestCopy, now)}
+          </span>
         </span>
-        <span className="file__when">{saves.length > 0 ? clock(item.latestAt) : ""}</span>
+        <span className="file__when" aria-hidden="true">{saves.length > 0 ? clock(item.latestAt) : ""}</span>
       </button>
       {open && (
         <section id={regionId} className="file__day" aria-label={`${item.name} today`}>
@@ -56,6 +67,7 @@ export function FileRow({ item, saves, copies, now, start, open, onToggle, onOpe
                 key={s.versionId}
                 className="line__dot"
                 data-copied={copied.has(s.versionId)}
+                aria-label={`${clock(s.at)}${copied.has(s.versionId) ? ", a copy left" : ""}`}
                 style={{ left: `${Math.min(100, Math.max(0, ((s.at - start) / span) * 100))}%` }}
                 title={clock(s.at)}
               />

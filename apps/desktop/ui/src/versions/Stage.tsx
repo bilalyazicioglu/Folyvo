@@ -7,12 +7,14 @@ interface Props {
   when: string;
   meta: string;
   preview: PreviewDto | undefined;
+  /** The picture could not be asked for at all; shown like a kind Quick Look cannot draw. */
+  failed: boolean;
   /** How many older saves lie behind this one; up to three faint pages are drawn. */
   older: number;
 }
 
 /** A picture of the file at one time, on a neutral stage. Evidence, never an editor. */
-export function Stage({ name, kind, when, meta, preview, older }: Props) {
+export function Stage({ name, kind, when, meta, preview, failed, older }: Props) {
   return (
     <section className={`stage stage--${kind}`} aria-label="Picture">
       <div className="stage__glow" aria-hidden="true" />
@@ -22,7 +24,7 @@ export function Stage({ name, kind, when, meta, preview, older }: Props) {
         ))}
         {preview?.picture ? (
           <img className="stage__picture" src={preview.picture} alt={`Picture of ${name} as it was ${when}`} draggable={false} />
-        ) : preview ? (
+        ) : preview || failed ? (
           <div className="stage__none">
             <span className={`tile tile--big tile--${kind}`} aria-hidden="true" />
             <p>No preview for this kind of file.</p>

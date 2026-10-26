@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, AppError } from "../api";
 import { copyLabel } from "../copies";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { fileKind } from "../files";
-import { useAction, useCopies, useHistory, useNow, usePreview, useRecent } from "../queries";
+import { useAction, useCopies, useHistory, useItem, useNow, usePreview } from "../queries";
 import { folderName, sizeLabel } from "../files";
 import { needsSeconds, whenLabel } from "../time";
 import { Stage } from "./Stage";
@@ -12,15 +12,18 @@ import { TimeList } from "./TimeList";
 /** One file's saved times: a picture of each, and Open, Save a Copy and Restore. */
 export function Versions({ itemId }: { itemId: string }) {
   const now = useNow();
-  const recent = useRecent();
+  const file = useItem(itemId);
   const history = useHistory(itemId);
   const copies = useCopies(itemId);
   const act = useAction();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const restoreRef = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
   const [saved, setSaved] = useState<{ folder: string; path: string } | null>(null);
 
-  const summary = recent.data?.find((i) => i.itemId === itemId);
+  const summary = file.data;
   const name = summary?.name ?? "";
   const versions = history.data ?? [];
   const selected = versions.find((v) => v.id === selectedId) ?? versions[0];
@@ -32,11 +35,19 @@ export function Versions({ itemId }: { itemId: string }) {
     void api.setWindowTitle(name).catch(() => {});
   }, [name]);
 
-  const loadError = history.error instanceof AppError ? history.error.info : null;
+  // The question takes focus; dismissing it hands focus back to the button that asked it.
+  useEffect(() => {
+    if (confirming) cancelRef.current?.focus();
+    else if (asked.current) restoreRef.current?.focus();
+    asked.current = confirming;
+  }, [confirming]);
+
+  const failure = history.error ?? file.error;
+  const loadError = failure instanceof AppError ? failure.info : null;
   if (!selected) {
     return (
       <main className="versions" aria-label="Saved versions" aria-busy={history.isPending}>
-        {loadError && <ErrorNotice error={loadError} onDismiss={() => void history.refetch()} />}
+        {loadError && <ErrorNotice error={loadError} onDismiss={() => void Promise.all([history.refetch(), file.refetch()])} />}
       </main>
     );
   }
@@ -108,6 +119,7 @@ export function Versions({ itemId }: { itemId: string }) {
           when={when}
           meta={`${when}, ${sizeLabel(selected.size)}${newest ? ". This is the file as it is now." : ""}`}
           preview={preview.data}
+          failed={preview.isError}
           older={versions.length - 1 - index}
         />
         <TimeList versions={versions} copies={copies.data ?? []} selected={selected.id} now={now} onSelect={select} />
@@ -120,7 +132,7 @@ export function Versions({ itemId }: { itemId: string }) {
             <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void restore()}>
               Restore
             </button>
-            <button type="button" className="btn" onClick={() => setConfirming(false)}>
+            <button type="button" className="btn" ref={cancelRef} onClick={() => setConfirming(false)}>
               Cancel
             </button>
           </div>
@@ -136,7 +148,13 @@ export function Versions({ itemId }: { itemId: string }) {
           Save a Copy…
         </button>
         {!newest && !confirming && (
-          <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => setConfirming(true)}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            ref={restoreRef}
+            disabled={act.busy}
+            onClick={() => setConfirming(true)}
+          >
             Restore
           </button>
         )}

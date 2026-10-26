@@ -58,7 +58,10 @@ export function middleTruncate(name: string, max: number): string {
   const chars = [...name];
   if (chars.length <= max) return name;
   const dot = name.lastIndexOf(".");
-  const tailStart = dot > 4 ? [...name.slice(0, dot)].length - 4 : chars.length - 8;
-  const tail = chars.slice(tailStart);
+  const ext = dot > 4 ? name.slice(dot + 1) : "";
+  // Text after the last dot counts as an extension only when it looks like one ("docx", not "final version …").
+  const hasExt = ext.length > 0 && ext.length <= 8 && !/\s/.test(ext);
+  const tailLength = hasExt ? [...ext].length + 1 + 4 : 8;
+  const tail = chars.slice(chars.length - Math.min(tailLength, max - 2));
   return chars.slice(0, max - tail.length - 1).join("") + "…" + tail.join("");
 }

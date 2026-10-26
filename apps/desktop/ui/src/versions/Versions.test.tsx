@@ -29,6 +29,7 @@ function backend() {
       ],
     },
   });
+  b.state.handlers.item = () => b.state.recent[0];
   b.state.handlers.preview = () => ({ picture: "data:image/png;base64,AAAA", appName: "Microsoft Word" });
   b.state.handlers.copies = () => [
     { itemId: "itm_01", versionId: "ver_02", kind: "handed", service: "mail", targetPath: null, at: at(26, 10, 14) },
@@ -182,4 +183,33 @@ test("a failed restore sends no notification", async () => {
   await userEvent.click(within(screen.getByRole("group", { name: "Confirm restore" })).getByRole("button", { name: "Restore" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Folyvo cannot reach that file");
   expect(notify).not.toHaveBeenCalled();
+});
+
+test("the window names a file that is not among the recent ones", async () => {
+  const b = backend();
+  const file = b.state.recent[0];
+  b.state.recent = [];
+  b.state.handlers.item = (a) => (a.item === "itm_01" ? file : undefined);
+  renderWithClient(<Versions itemId="itm_01" />);
+  expect(await screen.findByRole("heading", { name: NAME })).toBeInTheDocument();
+});
+
+test("a preview that fails shows the kind and says so", async () => {
+  const b = backend();
+  b.state.handlers.preview = () => {
+    throw { code: "internal", title: "Something went wrong inside Folyvo", hint: "Nothing was changed. Try again." };
+  };
+  renderWithClient(<Versions itemId="itm_01" />);
+  expect(await screen.findByText("No preview for this kind of file.")).toBeInTheDocument();
+});
+
+test("the restore question takes focus and cancel gives it back", async () => {
+  backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await option("17:20"));
+  await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+  const cancel = within(screen.getByRole("group", { name: "Confirm restore" })).getByRole("button", { name: "Cancel" });
+  expect(cancel).toHaveFocus();
+  await userEvent.click(cancel);
+  expect(screen.getByRole("button", { name: "Restore" })).toHaveFocus();
 });

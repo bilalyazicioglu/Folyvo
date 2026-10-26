@@ -30,6 +30,10 @@ impl AppApi {
         Ok(self.engine.list_recent(limit)?.into_iter().map(Into::into).collect())
     }
 
+    pub fn item(&self, item: &str) -> Result<ItemSummaryDto, UserError> {
+        Ok(self.engine.item(&ItemId::parse(item)?)?.into())
+    }
+
     pub fn history(&self, item: &str) -> Result<Vec<VersionDto>, UserError> {
         let item = ItemId::parse(item)?;
         Ok(self.engine.history(&item)?.into_iter().map(Into::into).collect())
@@ -105,14 +109,8 @@ impl AppApi {
     /// Open the working file (`newest`, when it exists) or a read-only copy of `version` in its app.
     pub fn open_version(&self, item: &str, version: &str, newest: bool) -> Result<(), UserError> {
         let (item_id, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
-        let working = self
-            .engine
-            .list_recent(u32::MAX)?
-            .into_iter()
-            .find(|i| i.item_id == item_id)
-            .and_then(|i| i.path)
-            .map(std::path::PathBuf::from)
-            .filter(|p| newest && p.is_file());
+        let working =
+            self.engine.item(&item_id)?.path.map(std::path::PathBuf::from).filter(|p| newest && p.is_file());
         let target = match working {
             Some(p) => p,
             None => self.engine.materialise(&item_id, &version)?,
@@ -202,6 +200,15 @@ mod tests {
         let c = r.api.copies(&item).unwrap();
         assert_eq!(c.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![CopyKind::Saved, CopyKind::Handed]);
         assert!(c[0].target_path.is_some() && c[1].service.as_deref() == Some("airdrop"));
+    }
+
+    #[test]
+    fn item_names_one_file_by_its_id() {
+        let r = rig();
+        r.save("Teklif.docx", b"one");
+        let i = r.api.item(&r.item()).unwrap();
+        assert_eq!((i.name.as_str(), i.missing), ("Teklif.docx", false));
+        assert!(r.api.item("itm_0f0f").is_err());
     }
 
     #[test]
