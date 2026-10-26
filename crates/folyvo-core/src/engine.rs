@@ -18,6 +18,7 @@ use crate::ports::{Clock, IdGen};
 use crate::reconcile;
 use crate::restore::Restorer;
 use crate::store::{repo, Store};
+use crate::which;
 
 pub use tokio::sync::broadcast::error::RecvError;
 
@@ -78,6 +79,26 @@ pub struct VaultStats {
     pub items: u64,
     pub versions: u64,
     pub bytes: u64,
+}
+
+/// An item's versions, newest first, each with its short code.
+pub(crate) fn version_views(c: &rusqlite::Connection, item: &ItemId) -> Result<Vec<VersionView>> {
+    let versions = repo::versions_newest_first(c, item)?;
+    let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
+    Ok(versions
+        .into_iter()
+        .zip(codes)
+        .map(|(v, code)| VersionView {
+            code,
+            id: v.id,
+            seq: v.seq,
+            created_at: v.created_at,
+            size: v.size,
+            content_hash: v.content_hash,
+            origin: v.origin,
+            note: v.note,
+        })
+        .collect())
 }
 
 pub(crate) struct Tracked {
@@ -345,22 +366,7 @@ impl Engine {
         if !repo::item_exists(c, item)? {
             return Err(CoreError::ItemMissing);
         }
-        let versions = repo::versions_newest_first(c, item)?;
-        let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
-        Ok(versions
-            .into_iter()
-            .zip(codes)
-            .map(|(v, code)| VersionView {
-                code,
-                id: v.id,
-                seq: v.seq,
-                created_at: v.created_at,
-                size: v.size,
-                content_hash: v.content_hash,
-                origin: v.origin,
-                note: v.note,
-            })
-            .collect())
+        version_views(c, item)
     }
 
     pub fn name_version(&self, version: &VersionId, note: Option<&str>) -> Result<()> {
@@ -402,6 +408,14 @@ impl Engine {
             return Err(CoreError::ItemMissing);
         }
         events::share_events(&g.store, item)
+    }
+
+    /// Every saved version whose content is exactly the file at `path`, earliest first. The file is
+    /// hashed before the writer lock is taken, so a large file does not hold up saving.
+    pub fn which_one(&self, path: &Path) -> Result<Vec<which::Match>> {
+        let hash = which::hash_of_file(path)?;
+        let g = self.lock();
+        which::matches_for_hash(&g.store, &hash)
     }
 
     pub fn restore(&self, item: &ItemId, version: &VersionId) -> Result<Version> {
@@ -542,6 +556,17 @@ mod tests {
         assert_eq!(t.events(), vec![EngineEvent::Handed { item: v.item_id.clone(), version: v.id.clone() }]);
         assert_eq!(t.engine.events(&v.item_id).unwrap(), vec![ev]);
         assert!(t.engine.ingest_path(&copy).unwrap().is_none(), "the materialised copy is never ingested");
+    }
+
+    #[test]
+    fn which_one_recognises_a_copy_through_the_engine() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        let copy = t.dir.path().join("copy.docx");
+        fs::write(&copy, b"one").unwrap();
+        let m = t.engine.which_one(&copy).unwrap();
+        assert_eq!(m.iter().map(|m| m.version.id.clone()).collect::<Vec<_>>(), vec![v.id]);
     }
 
     #[test]

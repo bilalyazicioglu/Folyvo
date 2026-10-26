@@ -27,4 +27,5 @@ pub mod rescan;
 pub mod restore;
 pub mod runner;
 pub mod watch;
+pub mod which;
 pub mod xattrs;
