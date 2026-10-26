@@ -75,6 +75,14 @@ pub struct VersionView {
     pub code: String,
 }
 
+/// One save: a version of an item and when it was made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Save {
+    pub item_id: ItemId,
+    pub version_id: VersionId,
+    pub at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultStats {
     pub items: u64,
@@ -426,6 +434,25 @@ impl Engine {
         which::matches_for_hash(&g.store, &hash)
     }
 
+    /// Saves and copies (saved or handed out) with `from_ms <= time < to_ms`, oldest first.
+    pub fn activity(&self, from_ms: i64, to_ms: i64) -> Result<(Vec<Save>, Vec<ShareEvent>)> {
+        let g = self.lock();
+        let c = g.store.conn();
+        let saves = repo::saves_between(c, from_ms, to_ms)?
+            .into_iter()
+            .map(|(item_id, version_id, at)| Save { item_id, version_id, at })
+            .collect();
+        Ok((saves, repo::events_between(c, from_ms, to_ms)?))
+    }
+
+    /// The item whose current location is `path`, missing or not.
+    pub fn item_at(&self, path: &Path) -> Result<Option<ItemId>> {
+        let Ok(key) = canonical_key(path) else {
+            return Ok(None);
+        };
+        repo::item_at_key(self.lock().store.conn(), &key)
+    }
+
     pub fn restore(&self, item: &ItemId, version: &VersionId) -> Result<Version> {
         let mut g = self.lock();
         let inner = &mut *g;
@@ -517,6 +544,39 @@ mod tests {
             self.clock.advance(1_000);
             self.engine.ingest_path(p).unwrap().unwrap().version().clone()
         }
+    }
+
+    #[test]
+    fn activity_returns_saves_and_copies_inside_the_range_only() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        t.save(&p, b"one"); // at 2 000
+        let v2 = t.save(&p, b"two"); // at 3 000
+        let v3 = t.save(&p, b"three"); // at 4 000
+        t.clock.advance(500); // 4 500
+        t.engine.record_handed(&v2.item_id, &v2.id, "mail").unwrap();
+        t.clock.advance(1_500); // 6 000
+        t.engine.record_handed(&v2.item_id, &v2.id, "copy").unwrap();
+        let (saves, copies) = t.engine.activity(2_500, 5_000).unwrap();
+        assert_eq!(
+            saves.iter().map(|s| (s.version_id.clone(), s.at)).collect::<Vec<_>>(),
+            vec![(v2.id.clone(), 3_000), (v3.id, 4_000)],
+            "the save at 2 000 is before the range"
+        );
+        assert_eq!(saves[0].item_id, v2.item_id);
+        assert_eq!(
+            copies.iter().map(|c| c.service.clone()).collect::<Vec<_>>(),
+            vec![Some("mail".to_string())]
+        );
+    }
+
+    #[test]
+    fn item_at_finds_a_tracked_file_and_nothing_else() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        assert_eq!(t.engine.item_at(&p).unwrap(), Some(v.item_id));
+        assert_eq!(t.engine.item_at(&t.file("other.docx", b"x")).unwrap(), None);
     }
 
     #[test]
