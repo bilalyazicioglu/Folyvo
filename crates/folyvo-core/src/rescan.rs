@@ -351,7 +351,6 @@ mod tests {
         t.rescan();
         let item = t.engine.list_recent(1).unwrap()[0].item_id.clone();
         let ver = t.engine.history(&item).unwrap()[0].id.clone();
-        t.engine.mark_share_ready(&item, &ver).unwrap();
         let out = t.root().join("out");
         fs::create_dir(&out).unwrap();
         let copy = t.engine.export(&item, &ver, &out).unwrap().destination;
@@ -385,7 +384,6 @@ mod tests {
         t.rescan();
         let item = t.engine.list_recent(1).unwrap()[0].item_id.clone();
         let ver = t.engine.history(&item).unwrap()[0].id.clone();
-        t.engine.mark_share_ready(&item, &ver).unwrap();
         let out = t.root().join("out");
         fs::create_dir(&out).unwrap();
         t.engine.export(&item, &ver, &out).unwrap();

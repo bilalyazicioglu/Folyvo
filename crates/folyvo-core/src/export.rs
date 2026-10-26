@@ -27,18 +27,16 @@ impl<'a> Exporter<'a> {
         Self { store, cas, clock }
     }
 
-    pub fn export(&mut self, item: &ItemId, expected: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
+    pub fn export(&mut self, item: &ItemId, version: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
         let (version, name) = {
             let c = self.store.conn();
             if !repo::item_exists(c, item)? {
                 return Err(CoreError::ItemMissing);
             }
-            let ready = repo::share_ready_version(c, item)?.ok_or(CoreError::ShareReadyMissing)?;
-            if &ready != expected {
-                return Err(CoreError::ShareReadyChanged { expected: expected.clone(), actual: ready });
-            }
-            let version = repo::version(c, &ready)?
-                .ok_or_else(|| CoreError::Corrupt(format!("share-ready points at missing {ready}")))?;
+            let version = match repo::version(c, version)? {
+                Some(v) if &v.item_id == item => v,
+                _ => return Err(CoreError::VersionMissing(version.clone())),
+            };
             let name = repo::current_path(c, item)?
                 .and_then(|p| Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()))
                 .or(repo::display_name(c, item)?)
@@ -204,7 +202,7 @@ fn copy_no_clobber(src: &Path, dest_dir: &Path, name: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use crate::model::ShareEventKind;
-    use crate::share::{mark_share_ready, share_events};
+    use crate::share::share_events;
     use crate::store::repo;
     use crate::testutil::Env;
     use std::fs;
@@ -213,7 +211,6 @@ mod tests {
     fn marked(e: &mut Env, name: &str, bytes: &[u8]) -> (ItemId, VersionId, PathBuf) {
         let p = e.file(name, bytes);
         let v = e.ingest(&p).unwrap().version().clone();
-        mark_share_ready(&mut e.store, &e.clock, &v.item_id, &v.id).unwrap();
         (v.item_id, v.id, p)
     }
 
@@ -254,26 +251,42 @@ mod tests {
     }
 
     #[test]
-    fn nothing_marked_means_share_ready_missing() {
-        let mut e = Env::new();
-        let p = e.file("a.docx", b"x");
-        let v = e.ingest(&p).unwrap().version().clone();
-        let d = dest(&e);
-        let err = export(&mut e, &v.item_id, &v.id, &d).unwrap_err();
-        assert!(matches!(err, CoreError::ShareReadyMissing), "{err}");
-    }
-
-    #[test]
-    fn exporting_a_version_that_is_no_longer_the_marked_one_is_refused() {
+    fn copies_an_older_version_without_any_mark() {
         let mut e = Env::new();
         let (item, v1, p) = marked(&mut e, "a.docx", b"one");
         fs::write(&p, b"two").unwrap();
-        let v2 = e.ingest(&p).unwrap().version().clone();
-        mark_share_ready(&mut e.store, &e.clock, &item, &v2.id).unwrap();
+        e.ingest(&p).unwrap();
         let d = dest(&e);
-        let err = export(&mut e, &item, &v1, &d).unwrap_err();
-        assert!(matches!(err, CoreError::ShareReadyChanged { .. }), "{err}");
+        let r = export(&mut e, &item, &v1, &d).unwrap();
+        assert_eq!(fs::read(&r.destination).unwrap(), b"one");
+        let log = share_events(&e.store, &item).unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].kind, ShareEventKind::Exported);
+        assert_eq!(log[0].version_id, v1);
+    }
+
+    #[test]
+    fn a_version_of_another_item_is_refused() {
+        let mut e = Env::new();
+        let (a, _, _) = marked(&mut e, "a.docx", b"aaa");
+        let (_, vb, _) = marked(&mut e, "b.docx", b"bbb");
+        let d = dest(&e);
+        let err = export(&mut e, &a, &vb, &d).unwrap_err();
+        assert!(matches!(err, CoreError::VersionMissing(_)), "{err}");
+        assert!(share_events(&e.store, &a).unwrap().is_empty());
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0, "nothing may be copied on refusal");
+    }
+
+    #[test]
+    fn copies_after_the_working_file_was_deleted() {
+        let mut e = Env::new();
+        let (item, v, p) = marked(&mut e, "Teklif_Müşteri.docx", b"kept");
+        fs::remove_file(&p).unwrap();
+        repo::set_missing(e.store.conn(), &item, true).unwrap();
+        let d = dest(&e);
+        let r = export(&mut e, &item, &v, &d).unwrap();
+        assert_eq!(r.destination.file_name().unwrap().to_string_lossy(), "Teklif_Müşteri.docx");
+        assert_eq!(fs::read(&r.destination).unwrap(), b"kept");
     }
 
     // Review Focus 4: existing names are never overwritten, read-only ones included.

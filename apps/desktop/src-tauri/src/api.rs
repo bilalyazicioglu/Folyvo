@@ -132,34 +132,17 @@ mod tests {
         assert_eq!(r.api.recent(10).unwrap()[0].status, StatusDto::ChangedSinceReady);
     }
 
-    // Review Focus 3: exporting something other than what the person was looking at.
     #[test]
-    fn export_refuses_when_the_ready_version_is_not_the_one_expected() {
+    fn export_copies_the_version_asked_for() {
         let r = rig();
         let p = r.save("a.docx", b"one");
         let item = r.item();
         let v1 = r.api.history(&item).unwrap()[0].id.clone();
-        r.api.mark_ready(&item, &v1).unwrap();
         fs::write(&p, b"two").unwrap();
         r.engine.ingest_path(&p).unwrap();
-        let v2 = r.api.history(&item).unwrap()[0].id.clone();
-        r.api.mark_ready(&item, &v2).unwrap();
 
-        let err = r.api.export(&item, &v1, &r.out()).unwrap_err();
-        assert_eq!(err.code, "share_ready_changed");
-        assert_eq!(fs::read_dir(r.dir.path().join("out")).unwrap().count(), 0, "nothing may be exported");
-
-        let ok = r.api.export(&item, &v2, &r.out()).unwrap();
-        assert_eq!(fs::read(&ok.destination).unwrap(), b"two");
-    }
-
-    #[test]
-    fn export_without_a_ready_version_says_so() {
-        let r = rig();
-        r.save("a.docx", b"one");
-        let item = r.item();
-        let v = r.api.history(&item).unwrap()[0].id.clone();
-        assert_eq!(r.api.export(&item, &v, &r.out()).unwrap_err().code, "share_ready_missing");
+        let older = r.api.export(&item, &v1, &r.out()).unwrap();
+        assert_eq!(fs::read(&older.destination).unwrap(), b"one");
     }
 
     #[test]
