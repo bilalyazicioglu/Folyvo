@@ -1,6 +1,6 @@
 # Folyvo
 
-Folyvo keeps every saved version of the files you work on, remembers which version you sent and how, and can tell which saved version a file is. Keep using Word, Excel or any other app. It runs on your own computer, needs no account and sends nothing anywhere.
+Folyvo keeps every saved version of the files you work on, remembers which version left your Mac and how, and can tell which saved version a file is. Keep using Word, Excel or any other app. It runs on your own computer, needs no account and sends nothing anywhere.
 
 The idea is to give people who work with documents the guarantees that developers get from Git, without the vocabulary.
 
