@@ -29,7 +29,9 @@ fn old_vault_hint() -> Option<String> {
     if std::env::var_os("FOLYVO_VAULT").is_some() || vault_dir().join("folyvo.db").exists() {
         return None;
     }
-    let old = dirs::home_dir()?.join(".folyvo");
+    // Earlier builds used exactly $HOME/.folyvo (not the platform's home folder lookup), so look
+    // in the same place.
+    let old = PathBuf::from(std::env::var_os("HOME")?).join(".folyvo");
     old.join("folyvo.db").exists().then(|| {
         format!(
             "Folyvo now keeps its history in {}. Your earlier history is in ~/.folyvo: move that folder there, or set FOLYVO_VAULT={} to keep using it.",
