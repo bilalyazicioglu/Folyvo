@@ -32,6 +32,20 @@ DROP TABLE share_ready;
 CREATE INDEX versions_by_hash ON versions(content_hash);
 ";
 
+/// Upgrade a v1 database in one transaction. The write lock is taken first and the version read
+/// again inside it, so a second process that arrives after the first has migrated does nothing.
+fn migrate_from_v1(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version != 1 {
+        return Ok(());
+    }
+    tx.execute_batch(MIGRATE_1_TO_2)?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -55,12 +69,7 @@ impl Store {
                 conn.execute_batch(SCHEMA)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1 => {
-                let tx = conn.transaction()?;
-                tx.execute_batch(MIGRATE_1_TO_2)?;
-                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-                tx.commit()?;
-            }
+            1 => migrate_from_v1(&mut conn)?,
             SCHEMA_VERSION => {}
             other => return Err(CoreError::Corrupt(format!("unsupported database schema version {other}"))),
         }
@@ -255,6 +264,9 @@ mod tests {
         assert_eq!((kind.as_str(), service, target.as_str()), ("exported", None, "/out/a.docx"));
         assert!(!has(&s, "table", "share_ready"));
         assert!(has(&s, "index", "versions_by_hash"));
+        let broken: i64 =
+            s.conn().query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(broken, 0, "every kept row still points at what it references");
     }
 
     #[test]
@@ -279,5 +291,19 @@ mod tests {
         assert!(ins("exported", "'mail'").is_err());
         ins("handed", "'mail'").unwrap();
         ins("exported", "NULL").unwrap();
+    }
+
+    // Final review, Important 4: two processes open the same v1 vault; the second one reaches the
+    // migration after the first has finished it.
+    #[test]
+    fn a_migration_another_process_already_finished_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folyvo.db");
+        v1_vault(&path);
+        let mut late = rusqlite::Connection::open(&path).unwrap();
+        drop(Store::open(&path).unwrap()); // the other process migrates first
+        migrate_from_v1(&mut late).unwrap();
+        let s = Store::open(&path).unwrap();
+        assert_eq!((count(&s, "versions"), count(&s, "share_events")), (3, 1));
     }
 }
