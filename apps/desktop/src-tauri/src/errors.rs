@@ -54,6 +54,9 @@ impl From<IdError> for UserError {
 impl From<CoreError> for UserError {
     fn from(e: CoreError) -> Self {
         match e {
+            CoreError::BadService(_) => {
+                Self::bad_request("Folyvo didn't recognise that app", "Try sending the copy again.")
+            }
             CoreError::ItemMissing => Self::new(
                 "item_missing",
                 "Folyvo can't find this file",
@@ -133,6 +136,7 @@ mod tests {
         assert_eq!(code(CoreError::NotAFile(PathBuf::from("/a/R.pages"))), "not_a_file");
         assert_eq!(code(CoreError::RootOverlapsVault(PathBuf::from("/v"))), "folder_not_allowed");
         assert_eq!(code(CoreError::Watch("x".into())), "cannot_watch");
+        assert_eq!(code(CoreError::BadService("sent".into())), "bad_request");
         assert_eq!(code(CoreError::PathTaken(PathBuf::from("/a"))), "internal");
     }
 

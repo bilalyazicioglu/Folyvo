@@ -144,6 +144,10 @@ pub enum EngineEventDto {
         item_id: String,
         destination: String,
     },
+    Handed {
+        item_id: String,
+        version_id: String,
+    },
     ItemMissing {
         item_id: String,
     },
@@ -165,6 +169,9 @@ impl From<EngineEvent> for EngineEventDto {
                 item_id: item.to_string(),
                 destination: destination.to_string_lossy().into_owned(),
             },
+            EngineEvent::Handed { item, version } => {
+                EngineEventDto::Handed { item_id: item.to_string(), version_id: version.to_string() }
+            }
             EngineEvent::ItemMissing { item } => EngineEventDto::ItemMissing { item_id: item.to_string() },
             EngineEvent::ItemUpdated { item } => EngineEventDto::ItemUpdated { item_id: item.to_string() },
             EngineEvent::RootsChanged => EngineEventDto::RootsChanged,
@@ -225,5 +232,13 @@ mod tests {
             json!({"kind": "rootsChanged"})
         );
         assert_eq!(serde_json::to_value(EngineEventDto::Resync).unwrap(), json!({"kind": "resync"}));
+        let handed = EngineEventDto::from(EngineEvent::Handed {
+            item: ItemId::from_suffix("01"),
+            version: VersionId::from_suffix("02"),
+        });
+        assert_eq!(
+            serde_json::to_value(handed).unwrap(),
+            json!({"kind": "handed", "itemId": "itm_01", "versionId": "ver_02"})
+        );
     }
 }

@@ -20,6 +20,7 @@ pub mod debounce;
 pub mod engine;
 pub mod events;
 pub mod export;
+pub mod handed;
 pub mod ignore;
 pub mod reconcile;
 pub mod rescan;

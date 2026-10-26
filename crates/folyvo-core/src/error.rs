@@ -23,6 +23,8 @@ pub enum CoreError {
     Db(#[from] rusqlite::Error),
     #[error("item not found")]
     ItemMissing,
+    #[error("unknown share service {0:?}")]
+    BadService(String),
     #[error("this file has no version v{0}")]
     NoSuchVersionNumber(i64),
     #[error("version {0} not found")]
