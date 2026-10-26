@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use crate::dto::{
-    ActivityDto, CopyDto, ExportDto, FolderDto, ItemSummaryDto, MatchDto, RestoreDto, VaultStatsDto,
-    VersionDto,
+    ActivityDto, CopyDto, ExportDto, FolderDto, ItemSummaryDto, MatchDto, PreviewDto, RestoreDto,
+    VaultStatsDto, VersionDto,
 };
 use crate::errors::UserError;
 use crate::runtime::AppRuntime;
@@ -63,6 +63,18 @@ pub async fn copies(rt: Rt<'_>, item: String) -> Result<Vec<CopyDto>, UserError>
 pub async fn item_at(rt: Rt<'_>, path: String) -> Result<Option<String>, UserError> {
     let api = rt.api();
     blocking(move || api.item_at(&path)).await
+}
+
+#[tauri::command]
+pub async fn preview(rt: Rt<'_>, item: String, version: String) -> Result<PreviewDto, UserError> {
+    let api = rt.api();
+    blocking(move || api.preview(&item, &version)).await
+}
+
+#[tauri::command]
+pub async fn open_version(rt: Rt<'_>, item: String, version: String, newest: bool) -> Result<(), UserError> {
+    let api = rt.api();
+    blocking(move || api.open_version(&item, &version, newest)).await
 }
 
 #[tauri::command]
