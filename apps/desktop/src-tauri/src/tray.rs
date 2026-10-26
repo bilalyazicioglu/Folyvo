@@ -26,7 +26,7 @@ impl Notifier for TauriNotifier {
 pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let popover = WebviewWindowBuilder::new(app, "popover", WebviewUrl::App("index.html".into()))
         .title("Folyvo")
-        .inner_size(400.0, 600.0)
+        .inner_size(crate::fit::POPOVER_WIDTH, 560.0)
         .decorations(false)
         .transparent(true)
         .resizable(false)
@@ -35,6 +35,8 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
         .skip_taskbar(true)
         .shadow(false)
         .build()?;
+
+    glass(&popover);
 
     let gate = std::sync::Arc::new(Mutex::new(ToggleGate::new(300)));
     app.manage(gate.clone());
@@ -81,19 +83,41 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Opens the history panel for an item, creating the window the first time.
-pub fn open_panel(app: &AppHandle, item: &str) -> tauri::Result<()> {
-    let url = format!("index.html?view=panel&item={item}");
-    if let Some(w) = app.get_webview_window("panel") {
+/// Liquid Glass behind the popover on macOS 26 and newer, the classic popover material before.
+/// Either way macOS draws it opaque when Reduce Transparency is on.
+#[cfg(target_os = "macos")]
+fn glass(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{
+        apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle,
+        NSVisualEffectMaterial, NSVisualEffectState,
+    };
+    let liquid = LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(18.0);
+    if apply_liquid_glass(window, liquid).is_err() {
+        let _ = apply_vibrancy(
+            window,
+            NSVisualEffectMaterial::Popover,
+            Some(NSVisualEffectState::Active),
+            Some(18.0),
+        );
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn glass(_window: &tauri::WebviewWindow) {}
+
+/// Opens the versions window for an item, creating it the first time.
+pub fn open_versions(app: &AppHandle, item: &str) -> tauri::Result<()> {
+    let url = format!("index.html?view=versions&item={item}");
+    if let Some(w) = app.get_webview_window("versions") {
         w.eval(format!("window.location.replace('/{url}')"))?;
         w.show()?;
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, "panel", WebviewUrl::App(url.into()))
-        .title("History")
-        .inner_size(560.0, 640.0)
-        .min_inner_size(420.0, 360.0)
+    WebviewWindowBuilder::new(app, "versions", WebviewUrl::App(url.into()))
+        .title("Versions")
+        .inner_size(1100.0, 760.0)
+        .min_inner_size(760.0, 520.0)
         .build()?;
     Ok(())
 }
