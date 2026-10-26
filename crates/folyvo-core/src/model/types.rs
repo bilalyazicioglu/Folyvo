@@ -41,8 +41,9 @@ pub struct Version {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShareEventKind {
-    Marked,
     Exported,
+    /// The file went to another app through the share sheet (Mail, AirDrop, Copy, ...).
+    Handed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +51,8 @@ pub struct ShareEvent {
     pub item_id: ItemId,
     pub version_id: VersionId,
     pub kind: ShareEventKind,
+    /// For `Handed`: `mail`, `airdrop`, `messages`, `copy` or `other:<title>`.
+    pub service: Option<String>,
     pub target_path: Option<String>,
     pub at: i64,
 }
@@ -57,15 +60,15 @@ pub struct ShareEvent {
 impl ShareEventKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            ShareEventKind::Marked => "marked",
             ShareEventKind::Exported => "exported",
+            ShareEventKind::Handed => "handed",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "marked" => Some(ShareEventKind::Marked),
             "exported" => Some(ShareEventKind::Exported),
+            "handed" => Some(ShareEventKind::Handed),
             _ => None,
         }
     }

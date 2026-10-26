@@ -58,6 +58,7 @@ impl<'a> Exporter<'a> {
                 item_id: item.clone(),
                 version_id: version.id.clone(),
                 kind: ShareEventKind::Exported,
+                service: None,
                 target_path: Some(destination.to_string_lossy().into_owned()),
                 at: now,
             },
@@ -415,7 +416,7 @@ mod tests {
         let nowhere = e.dir.path().join("does-not-exist");
         assert!(export(&mut e, &item, &v, &nowhere).is_err());
         let log = share_events(&e.store, &item).unwrap();
-        assert!(log.iter().all(|ev| ev.kind == ShareEventKind::Marked));
+        assert!(log.is_empty(), "{log:?}");
     }
 
     #[test]
