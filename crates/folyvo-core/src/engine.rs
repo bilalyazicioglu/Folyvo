@@ -11,7 +11,7 @@ use crate::error::{CoreError, Result};
 use crate::export::{ExportResult, Exporter};
 use crate::ignore::{is_ignored, is_ignored_under};
 use crate::ingest::{IngestOutcome, Ingestor};
-use crate::model::{ContentHash, ItemId, ItemStatus, Version, VersionId, VersionOrigin};
+use crate::model::{version_codes, ContentHash, ItemId, ItemStatus, Version, VersionId, VersionOrigin};
 use crate::ports::{Clock, IdGen};
 use crate::reconcile;
 use crate::restore::Restorer;
@@ -68,6 +68,8 @@ pub struct VersionView {
     pub origin: VersionOrigin,
     pub note: Option<String>,
     pub is_share_ready: bool,
+    /// Short code for this version, unique within its item (see `model::version_codes`).
+    pub code: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,9 +349,13 @@ impl Engine {
             return Err(CoreError::ItemMissing);
         }
         let ready = repo::share_ready_version(c, item)?;
-        Ok(repo::versions_newest_first(c, item)?
+        let versions = repo::versions_newest_first(c, item)?;
+        let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
+        Ok(versions
             .into_iter()
-            .map(|v| VersionView {
+            .zip(codes)
+            .map(|(v, code)| VersionView {
+                code,
                 is_share_ready: ready.as_ref() == Some(&v.id),
                 id: v.id,
                 seq: v.seq,
@@ -534,6 +540,19 @@ mod tests {
         let t = setup();
         let p = t.file("never-saved.docx", b"x");
         assert_eq!(t.engine.item_status(&p).unwrap(), None);
+    }
+
+    #[test]
+    fn history_gives_each_version_a_unique_code() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v1 = t.save(&p, b"one");
+        let v2 = t.save(&p, b"two");
+        let h = t.engine.history(&v1.item_id).unwrap();
+        let suffix = |id: &VersionId| id.as_str().trim_start_matches(VersionId::PREFIX).to_owned();
+        assert_eq!(h[0].code, suffix(&v2.id));
+        assert_eq!(h[1].code, suffix(&v1.id));
+        assert_ne!(h[0].code, h[1].code);
     }
 
     #[test]

@@ -86,6 +86,7 @@ pub struct VersionDto {
     pub origin: OriginDto,
     pub note: Option<String>,
     pub is_share_ready: bool,
+    pub code: String,
 }
 
 impl From<VersionView> for VersionDto {
@@ -99,6 +100,7 @@ impl From<VersionView> for VersionDto {
             origin: v.origin.into(),
             note: v.note,
             is_share_ready: v.is_share_ready,
+            code: v.code,
         }
     }
 }
@@ -234,6 +236,7 @@ mod tests {
             origin: VersionOrigin::Restore,
             note: Some("Sent to Acme".into()),
             is_share_ready: true,
+            code: "0a".into(),
         };
         let json = serde_json::to_value(VersionDto::from(v)).unwrap();
         assert_eq!(json["id"], "ver_0a");
@@ -242,6 +245,7 @@ mod tests {
         assert_eq!(json["origin"], "restore");
         assert_eq!(json["note"], "Sent to Acme");
         assert_eq!(json["isShareReady"], true);
+        assert_eq!(json["code"], "0a");
     }
 
     #[test]

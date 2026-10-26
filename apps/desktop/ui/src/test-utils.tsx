@@ -23,6 +23,7 @@ export function version(over: Partial<VersionDto> = {}): VersionDto {
   const seq = over.seq ?? 1;
   return {
     id: `ver_${seq.toString(16).padStart(2, "0")}`,
+    code: seq.toString(16).padStart(2, "0"),
     seq,
     createdAt: Date.now() - seq * 60_000,
     size: 48_000,
