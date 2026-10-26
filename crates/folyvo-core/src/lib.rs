@@ -9,6 +9,7 @@ pub mod store;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod canonical;
 pub mod ingest;
+mod lock;
 #[cfg(test)]
 mod testutil;
 pub mod vault;

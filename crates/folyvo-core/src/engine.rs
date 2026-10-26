@@ -13,6 +13,7 @@ use crate::export::{ExportResult, Exporter};
 use crate::handed;
 use crate::ignore::{is_ignored, is_ignored_under};
 use crate::ingest::{IngestOutcome, Ingestor};
+use crate::lock::VaultLock;
 use crate::model::{version_codes, ContentHash, ItemId, ShareEvent, Version, VersionId, VersionOrigin};
 use crate::ports::{Clock, IdGen};
 use crate::reconcile;
@@ -114,6 +115,7 @@ struct Inner {
 }
 
 pub struct Engine {
+    _lock: VaultLock,
     vault: PathBuf,
     vault_key: String,
     inner: Mutex<Inner>,
@@ -139,22 +141,28 @@ impl Engine {
     pub fn open(vault: &Path, clock: Arc<dyn Clock>, ids: Arc<dyn IdGen>) -> Result<Engine> {
         fs::create_dir_all(vault).map_err(|e| CoreError::io(vault, e))?;
         let cas = Cas::open(vault)?;
-        cas.sweep_tmp()?;
+        let (lock, alone) = VaultLock::acquire(vault)?;
         let store = Store::open(&vault.join("folyvo.db"))?;
         let vault_key = canonical_key(vault)?;
-        // Objects without a database row are leftovers of a crash between the object write and
-        // the version insert. Nothing is ingesting yet, so removing them is safe.
-        let known: HashSet<String> = repo::all_object_hashes(store.conn())?.into_iter().collect();
-        for hash in cas.object_hashes()? {
-            if !known.contains(hash.as_str()) {
-                cas.remove_object(&hash)?;
+        if alone {
+            // Nothing else has the vault open, so leftovers are from a crash: a temp file, or an
+            // object written before its version row. Another process's in-flight work looks the
+            // same, which is why this only runs while the vault is ours alone.
+            cas.sweep_tmp()?;
+            let known: HashSet<String> = repo::all_object_hashes(store.conn())?.into_iter().collect();
+            for hash in cas.object_hashes()? {
+                if !known.contains(hash.as_str()) {
+                    cas.remove_object(&hash)?;
+                }
             }
         }
+        lock.share()?;
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let engine = Engine {
             vault: vault.to_path_buf(),
             vault_key,
             inner: Mutex::new(Inner { store, cas }),
+            _lock: lock,
             tracked: RwLock::new(HashSet::new()),
             clock,
             ids,
@@ -816,6 +824,30 @@ mod tests {
         let again = Engine::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
         assert!(!orphan_path.exists());
         assert!(again.object_path(&v.content_hash).exists());
+    }
+
+    // Final review, Important 1: the CLI and the app share a vault, so one must never sweep away
+    // an object the other has written but not yet committed.
+    #[test]
+    fn an_object_another_open_vault_is_still_writing_is_never_swept() {
+        let t = setup();
+        let vault = t.dir.path().join("vault");
+        let in_flight = crate::model::ContentHash::of_bytes(b"being written by another process");
+        let path = t.engine.object_path(&in_flight);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"being written by another process").unwrap();
+
+        let second = Engine::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
+        assert!(path.exists(), "the first engine still has the vault open");
+        let cli = crate::Vault::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
+        drop(t.engine);
+        drop(second);
+        let third = Engine::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
+        assert!(path.exists(), "the command line still has the vault open");
+        drop(cli);
+        drop(third);
+        drop(Engine::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap());
+        assert!(!path.exists(), "alone, the engine sweeps leftovers as before");
     }
 
     #[test]
