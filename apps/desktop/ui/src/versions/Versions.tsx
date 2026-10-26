@@ -65,7 +65,9 @@ export function Versions({ itemId }: { itemId: string }) {
   const restore = async () => {
     setConfirming(false);
     const r = await act.run(() => api.restore(itemId, selected.id));
-    if (r.ok) setSelectedId(null);
+    if (!r.ok) return;
+    setSelectedId(null);
+    void api.notify(`Back to ${when}`, `${name}. Today's version is still in its history.`);
   };
 
   return (

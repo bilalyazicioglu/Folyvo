@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { ActivityDto } from "./generated/ActivityDto";
 import type { CopyDto } from "./generated/CopyDto";
 import type { ExportDto } from "./generated/ExportDto";
@@ -73,6 +74,15 @@ export const api = {
     }),
   closeWindow: () => getCurrentWindow().close(),
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
+  /** A standard macOS notification. Asks for permission once; a refusal stays silent. */
+  notify: async (title: string, body: string): Promise<void> => {
+    try {
+      const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+      if (granted) sendNotification({ title, body });
+    } catch {
+      // Notifications are a courtesy; the window already shows the restored version.
+    }
+  },
   /** Native folder picker. Resolves to null when the person cancels. */
   chooseFolder: async (title: string): Promise<string | null> => {
     // The picker takes focus from the popover, which would hide it and the picker with it.

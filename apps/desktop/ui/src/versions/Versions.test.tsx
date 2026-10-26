@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { api } from "../api";
 import { item, mockBackend, renderWithClient, version } from "../test-utils";
 import { Versions } from "./Versions";
 
@@ -11,7 +12,10 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 /** Three saves: today 10:12 (newest), today 09:58 (attached in Mail), yesterday 17:20. */
 function backend() {
@@ -153,4 +157,29 @@ test("done closes the window", async () => {
   renderWithClient(<Versions itemId="itm_01" />);
   await userEvent.click(await screen.findByRole("button", { name: "Done" }));
   await waitFor(() => expect(b.called("plugin:window|close")).toHaveLength(1));
+});
+
+test("a restore is confirmed by a notification", async () => {
+  const notify = vi.spyOn(api, "notify").mockResolvedValue();
+  backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await option("17:20"));
+  await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await userEvent.click(within(screen.getByRole("group", { name: "Confirm restore" })).getByRole("button", { name: "Restore" }));
+  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(notify).toHaveBeenCalledWith("Back to Yesterday 17:20", `${NAME}. Today's version is still in its history.`);
+});
+
+test("a failed restore sends no notification", async () => {
+  const notify = vi.spyOn(api, "notify").mockResolvedValue();
+  const b = backend();
+  b.state.handlers.restore = () => {
+    throw { code: "file_unavailable", title: "Folyvo cannot reach that file", hint: "Check it and try again." };
+  };
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await option("17:20"));
+  await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await userEvent.click(within(screen.getByRole("group", { name: "Confirm restore" })).getByRole("button", { name: "Restore" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Folyvo cannot reach that file");
+  expect(notify).not.toHaveBeenCalled();
 });
