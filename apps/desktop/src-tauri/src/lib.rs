@@ -3,6 +3,7 @@ pub mod api;
 pub mod commands;
 pub mod dto;
 pub mod errors;
+pub mod preview;
 pub mod runtime;
 pub mod toggle;
 pub mod tray;
@@ -35,6 +36,8 @@ pub fn run() {
             commands::copies,
             commands::item_at,
             commands::which,
+            commands::preview,
+            commands::open_version,
             commands::restore,
             commands::stats,
             commands::folders,

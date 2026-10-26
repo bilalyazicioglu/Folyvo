@@ -4,10 +4,14 @@ use std::sync::Arc;
 use folyvo_core::engine::Engine;
 use folyvo_core::model::{ItemId, VersionId};
 
+use base64::Engine as _;
+
 use crate::dto::{
-    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MatchDto, RestoreDto, VaultStatsDto, VersionDto,
+    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MatchDto, PreviewDto, RestoreDto, VaultStatsDto,
+    VersionDto,
 };
 use crate::errors::UserError;
+use crate::preview;
 
 const MAX_NAME_CHARS: usize = 200;
 
@@ -77,6 +81,43 @@ impl AppApi {
     pub fn restore(&self, item: &str, version: &str) -> Result<RestoreDto, UserError> {
         let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
         Ok(self.engine.restore(&item, &version)?.into())
+    }
+
+    /// A picture of `version` and the app that opens it. The picture is drawn from a read-only copy.
+    pub fn preview(&self, item: &str, version: &str) -> Result<PreviewDto, UserError> {
+        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        let copy = self.engine.materialise(&item, &version)?;
+        let key = self
+            .engine
+            .history(&item)?
+            .into_iter()
+            .find(|v| v.id == version)
+            .map(|v| v.content_hash.to_string())
+            .ok_or(folyvo_core::CoreError::VersionMissing(version.clone()))?;
+        let cache = std::env::temp_dir().join("folyvo-previews");
+        let picture =
+            preview::thumbnail(&copy, &cache, &key).and_then(|png| std::fs::read(png).ok()).map(|bytes| {
+                format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+            });
+        Ok(PreviewDto { picture, app_name: preview::default_app_name(&copy) })
+    }
+
+    /// Open the working file (`newest`, when it exists) or a read-only copy of `version` in its app.
+    pub fn open_version(&self, item: &str, version: &str, newest: bool) -> Result<(), UserError> {
+        let (item_id, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        let working = self
+            .engine
+            .list_recent(u32::MAX)?
+            .into_iter()
+            .find(|i| i.item_id == item_id)
+            .and_then(|i| i.path)
+            .map(std::path::PathBuf::from)
+            .filter(|p| newest && p.is_file());
+        let target = match working {
+            Some(p) => p,
+            None => self.engine.materialise(&item_id, &version)?,
+        };
+        preview::open_in_app(&target).map_err(|_| UserError::internal())
     }
 
     pub fn stats(&self) -> Result<VaultStatsDto, UserError> {
@@ -196,6 +237,29 @@ mod tests {
         let v = r.api.history(&item).unwrap()[0].id.clone();
         let out = r.api.export(&item, &v, &r.out()).unwrap();
         assert_eq!(out.version_id, v);
+    }
+
+    #[test]
+    fn preview_of_an_unknown_version_is_a_user_error() {
+        let r = rig();
+        r.save("a.docx", b"one");
+        assert_eq!(r.api.preview(&r.item(), "ver_00ff").unwrap_err().code, "version_missing");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn preview_of_a_saved_text_file_has_a_picture_and_an_app() {
+        let r = rig();
+        r.save("notlar.txt", "Toplantı notları\nfiyatlar güncellendi\n".as_bytes());
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        let p = r.api.preview(&item, &v).unwrap();
+        assert!(
+            p.picture.as_deref().is_some_and(|d| d.starts_with("data:image/png;base64,")),
+            "{:?}",
+            p.picture.map(|d| d.len())
+        );
+        assert!(p.app_name.is_some());
     }
 
     #[test]

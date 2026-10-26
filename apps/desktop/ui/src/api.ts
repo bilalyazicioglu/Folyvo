@@ -4,6 +4,7 @@ import type { ActivityDto } from "./generated/ActivityDto";
 import type { CopyDto } from "./generated/CopyDto";
 import type { ExportDto } from "./generated/ExportDto";
 import type { MatchDto } from "./generated/MatchDto";
+import type { PreviewDto } from "./generated/PreviewDto";
 import type { FolderDto } from "./generated/FolderDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
 import type { RestoreDto } from "./generated/RestoreDto";
@@ -45,6 +46,9 @@ export const api = {
   copies: (item: string) => call<CopyDto[]>("copies", { item }),
   itemAt: (path: string) => call<string | null>("item_at", { path }),
   which: (path: string) => call<MatchDto[]>("which", { path }),
+  preview: (item: string, version: string) => call<PreviewDto>("preview", { item, version }),
+  /** Opens the working file (newest) or a read-only copy of the version in its app. */
+  openVersion: (item: string, version: string, newest: boolean) => call<void>("open_version", { item, version, newest }),
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
   folders: () => call<FolderDto[]>("folders"),

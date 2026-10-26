@@ -274,6 +274,17 @@ impl From<Match> for MatchDto {
     }
 }
 
+/// What the versions window shows for one version.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreviewDto {
+    /// `data:image/png;base64,...`, or none when Quick Look cannot draw this kind of file.
+    pub picture: Option<String>,
+    /// The app that opens this kind of file, such as "Microsoft Word".
+    pub app_name: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
