@@ -10,7 +10,7 @@ test("commands pass camelCase arguments and return the backend's data", async ()
     }
   });
   const out = await api.exportVersion("itm_01", "ver_01", "/Sent");
-  expect(seen).toEqual({ item: "itm_01", expected: "ver_01", destDir: "/Sent" });
+  expect(seen).toEqual({ item: "itm_01", version: "ver_01", destDir: "/Sent" });
   expect(out.destination).toBe("/Sent/a.docx");
 });
 
@@ -31,4 +31,24 @@ test("anything that is not a typed error becomes the generic message", async () 
   const err = await api.stats().catch((e) => e);
   expect(err.info).toEqual(INTERNAL_ERROR);
   expect(JSON.stringify(err.info)).not.toContain("sqlite");
+});
+
+test("exportVersion sends the version to copy, not an expected one", async () => {
+  let seen: unknown;
+  mockIPC((cmd, args) => {
+    if (cmd === "export") seen = args;
+    return { destination: "/out/a.docx", versionId: "ver_01" };
+  });
+  await api.exportVersion("itm_01", "ver_01", "/out");
+  expect(seen).toEqual({ item: "itm_01", version: "ver_01", destDir: "/out" });
+});
+
+test("which passes the path and returns the matches", async () => {
+  let seen: unknown;
+  mockIPC((cmd, args) => {
+    if (cmd === "which") seen = args;
+    return [];
+  });
+  expect(await api.which("/Users/a/back.docx")).toEqual([]);
+  expect(seen).toEqual({ path: "/Users/a/back.docx" });
 });

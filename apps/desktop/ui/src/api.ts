@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { ActivityDto } from "./generated/ActivityDto";
+import type { CopyDto } from "./generated/CopyDto";
 import type { ExportDto } from "./generated/ExportDto";
+import type { MatchDto } from "./generated/MatchDto";
 import type { FolderDto } from "./generated/FolderDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
 import type { RestoreDto } from "./generated/RestoreDto";
@@ -36,7 +39,12 @@ export const api = {
   recent: (limit = 20) => call<ItemSummaryDto[]>("recent", { limit }),
   history: (item: string) => call<VersionDto[]>("history", { item }),
   nameVersion: (version: string, note: string | null) => call<void>("name_version", { version, note }),
-  exportVersion: (item: string, expected: string, destDir: string) => call<ExportDto>("export", { item, expected, destDir }),
+  exportVersion: (item: string, version: string, destDir: string) => call<ExportDto>("export", { item, version, destDir }),
+  /** Saves and copies with from <= time < to (unix ms). */
+  activity: (from: number, to: number) => call<ActivityDto>("activity", { from, to }),
+  copies: (item: string) => call<CopyDto[]>("copies", { item }),
+  itemAt: (path: string) => call<string | null>("item_at", { path }),
+  which: (path: string) => call<MatchDto[]>("which", { path }),
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
   folders: () => call<FolderDto[]>("folders"),

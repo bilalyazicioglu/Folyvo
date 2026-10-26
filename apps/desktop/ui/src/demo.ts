@@ -47,6 +47,15 @@ export function demoHandlers() {
     name_version: (a: Args) => {
       for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.note = (a.note as string | null) ?? null; });
     },
+    activity: (a: Args) => ({
+      saves: Object.entries(histories).flatMap(([itemId, h]) =>
+        h.filter((v) => v.createdAt >= (a.from as number) && v.createdAt < (a.to as number)).map((v) => ({ itemId, versionId: v.id, at: v.createdAt })),
+      ),
+      copies: [],
+    }),
+    copies: (_: Args) => [],
+    item_at: (_: Args) => null,
+    which: (_: Args) => [],
     export: (a: Args) => {
       return { destination: `${a.destDir}/${names[a.item as string]}`, versionId: a.version as string };
     },

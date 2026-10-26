@@ -47,7 +47,7 @@ test("exporting an older version copies exactly that version", async () => {
   renderWithClient(<Panel itemId="itm_01" />);
   await userEvent.click(await within(await screen.findByRole("listitem", { name: "Version 2" })).findByRole("button", { name: "Export v2" }));
   expect(await screen.findByText("Exported v2")).toBeInTheDocument();
-  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_02", destDir: "/Users/a/Sent" });
+  expect(b.called("export")[0].args).toEqual({ item: "itm_01", version: "ver_02", destDir: "/Users/a/Sent" });
 });
 
 // Review Focus 4: restore must explain that unsaved work is kept, and never run on the first click.

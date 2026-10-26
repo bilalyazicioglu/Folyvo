@@ -1,6 +1,7 @@
-use folyvo_core::engine::{EngineEvent, ItemSummary, VaultStats, VersionView};
+use folyvo_core::engine::{EngineEvent, ItemSummary, Save, VaultStats, VersionView};
 use folyvo_core::export::ExportResult;
-use folyvo_core::model::{Version, VersionOrigin};
+use folyvo_core::model::{ShareEvent, ShareEventKind, Version, VersionOrigin};
+use folyvo_core::which::Match;
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -188,6 +189,91 @@ pub struct FolderDto {
     pub problem: Option<crate::errors::UserError>,
 }
 
+/// How a copy left: saved to a folder through Folyvo, or handed to another app.
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum CopyKind {
+    Saved,
+    Handed,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CopyDto {
+    pub item_id: String,
+    pub version_id: String,
+    pub kind: CopyKind,
+    pub service: Option<String>,
+    pub target_path: Option<String>,
+    #[ts(type = "number")]
+    pub at: i64,
+}
+
+impl From<ShareEvent> for CopyDto {
+    fn from(e: ShareEvent) -> Self {
+        Self {
+            item_id: e.item_id.to_string(),
+            version_id: e.version_id.to_string(),
+            kind: match e.kind {
+                ShareEventKind::Exported => CopyKind::Saved,
+                ShareEventKind::Handed => CopyKind::Handed,
+            },
+            service: e.service,
+            target_path: e.target_path,
+            at: e.at,
+        }
+    }
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SaveDto {
+    pub item_id: String,
+    pub version_id: String,
+    #[ts(type = "number")]
+    pub at: i64,
+}
+
+impl From<Save> for SaveDto {
+    fn from(s: Save) -> Self {
+        Self { item_id: s.item_id.to_string(), version_id: s.version_id.to_string(), at: s.at }
+    }
+}
+
+/// Saves and copies in a time range (the popover asks for today).
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ActivityDto {
+    pub saves: Vec<SaveDto>,
+    pub copies: Vec<CopyDto>,
+}
+
+/// One saved version whose content is exactly a given file.
+#[derive(Serialize, TS, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MatchDto {
+    pub item_id: String,
+    pub name: String,
+    pub version: VersionDto,
+    pub copies: Vec<CopyDto>,
+}
+
+impl From<Match> for MatchDto {
+    fn from(m: Match) -> Self {
+        Self {
+            item_id: m.item_id.to_string(),
+            name: m.name,
+            version: m.version.into(),
+            copies: m.events.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +326,23 @@ mod tests {
             serde_json::to_value(handed).unwrap(),
             json!({"kind": "handed", "itemId": "itm_01", "versionId": "ver_02"})
         );
+    }
+
+    #[test]
+    fn a_copy_serialises_its_kind_in_camel_case() {
+        use folyvo_core::model::{ShareEvent, ShareEventKind};
+        let handed = CopyDto::from(ShareEvent {
+            item_id: ItemId::from_suffix("01"),
+            version_id: VersionId::from_suffix("02"),
+            kind: ShareEventKind::Handed,
+            service: Some("mail".into()),
+            target_path: None,
+            at: 5,
+        });
+        assert_eq!(
+            serde_json::to_value(handed).unwrap(),
+            json!({"itemId": "itm_01", "versionId": "ver_02", "kind": "handed", "service": "mail", "targetPath": null, "at": 5})
+        );
+        assert_eq!(serde_json::to_value(CopyKind::Saved).unwrap(), json!("saved"));
     }
 }
