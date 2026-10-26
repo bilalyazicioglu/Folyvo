@@ -194,3 +194,22 @@ fn ready_is_no_longer_a_command() {
     let (ok, text) = folyvo(&vault, &["ready", p, "v1"]);
     assert!(!ok && text.contains("usage:") && !text.contains("ready"), "{text}");
 }
+
+// Final review, Important 2: the CLI used to keep its history in ~/.folyvo.
+#[test]
+fn an_old_vault_in_the_home_folder_is_pointed_out_not_silently_ignored() {
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir(home.path().join(".folyvo")).unwrap();
+    fs::write(home.path().join(".folyvo").join("folyvo.db"), b"").unwrap();
+    let f = home.path().join("a.txt");
+    fs::write(&f, b"x").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_folyvo"))
+        .env_remove("FOLYVO_VAULT")
+        .env_remove("XDG_DATA_HOME")
+        .env("HOME", home.path())
+        .args(["log", f.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("~/.folyvo") && err.contains("FOLYVO_VAULT"), "{err}");
+}
