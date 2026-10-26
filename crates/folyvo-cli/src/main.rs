@@ -24,6 +24,21 @@ fn vault_dir() -> PathBuf {
     dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("Folyvo")
 }
 
+/// Earlier builds kept the command line's history in ~/.folyvo. Say so instead of looking empty.
+fn old_vault_hint() -> Option<String> {
+    if std::env::var_os("FOLYVO_VAULT").is_some() || vault_dir().join("folyvo.db").exists() {
+        return None;
+    }
+    let old = dirs::home_dir()?.join(".folyvo");
+    old.join("folyvo.db").exists().then(|| {
+        format!(
+            "Folyvo now keeps its history in {}. Your earlier history is in ~/.folyvo: move that folder there, or set FOLYVO_VAULT={} to keep using it.",
+            vault_dir().display(),
+            old.display()
+        )
+    })
+}
+
 /// Local time, minute precision.
 fn when(ms: i64) -> String {
     Local
@@ -98,6 +113,9 @@ fn run(args: &[String]) -> Result<String, String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(hint) = old_vault_hint() {
+        eprintln!("{hint}");
+    }
     match run(&args) {
         Ok(text) => {
             print!("{text}");
