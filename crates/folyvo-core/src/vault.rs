@@ -7,16 +7,14 @@ use crate::cas::Cas;
 use crate::error::{CoreError, Result};
 use crate::export::{ExportResult, Exporter};
 use crate::ingest::{IngestOutcome, Ingestor};
-use crate::model::{ItemId, ItemStatus, Version, VersionId};
+use crate::model::{ItemId, Version, VersionId};
 use crate::ports::{Clock, IdGen};
 use crate::restore::Restorer;
-use crate::share;
 use crate::store::{repo, Store};
 
 pub struct History {
     pub name: String,
     pub versions: Vec<Version>,
-    pub share_ready: Option<VersionId>,
 }
 
 pub struct Vault {
@@ -43,29 +41,15 @@ impl Vault {
         let c = self.store.conn();
         let item = repo::item_at_key(c, &key)?.ok_or(CoreError::ItemMissing)?;
         let versions = repo::versions_newest_first(c, &item)?;
-        let share_ready = repo::share_ready_version(c, &item)?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        Ok(History { name, versions, share_ready })
+        Ok(History { name, versions })
     }
 
-    pub fn status(&self, path: &Path) -> Result<ItemStatus> {
-        let item = self.item_of(path)?;
-        share::item_status(&self.store, &item)
-    }
-
-    /// Mark version number `seq` of the file as the one that is ready to share.
-    pub fn mark_ready(&mut self, path: &Path, seq: i64) -> Result<()> {
-        let item = self.item_of(path)?;
-        let version = self.version_by_seq(&item, seq)?;
-        share::mark_share_ready(&mut self.store, self.clock.as_ref(), &item, &version)
-    }
-
-    /// Copy the share-ready version into `dest_dir`; the original is never touched.
+    /// Copy the newest version into `dest_dir`; the original is never touched.
     pub fn export(&mut self, path: &Path, dest_dir: &Path) -> Result<ExportResult> {
         let item = self.item_of(path)?;
-        let ready =
-            repo::share_ready_version(self.store.conn(), &item)?.ok_or(CoreError::ShareReadyMissing)?;
-        Exporter::new(&mut self.store, &self.cas, self.clock.as_ref()).export(&item, &ready, dest_dir)
+        let newest = repo::latest_version(self.store.conn(), &item)?.ok_or(CoreError::ItemMissing)?;
+        Exporter::new(&mut self.store, &self.cas, self.clock.as_ref()).export(&item, &newest.id, dest_dir)
     }
 
     /// Bring version number `seq` back as a new version.
@@ -148,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn marking_exporting_and_restoring_round_trip_through_the_vault() {
+    fn copying_and_restoring_round_trip_through_the_vault() {
         let dir = tempfile::tempdir().unwrap();
         let mut v = vault(dir.path());
         let f = dir.path().join("Proposal.docx");
@@ -157,20 +141,15 @@ mod tests {
         fs::write(&f, b"edited afterwards").unwrap();
         v.save(&f).unwrap();
 
-        v.mark_ready(&f, 1).unwrap();
-        let h = v.history(&f).unwrap();
-        assert_eq!(h.share_ready.as_ref(), Some(&h.versions[1].id));
-        assert_eq!(v.status(&f).unwrap(), crate::model::ItemStatus::ChangedSinceReady);
-
         let out = dir.path().join("out");
         fs::create_dir(&out).unwrap();
         let exported = v.export(&f, &out).unwrap();
-        assert_eq!(fs::read(&exported.destination).unwrap(), b"sent to the client");
+        assert_eq!(fs::read(&exported.destination).unwrap(), b"edited afterwards");
 
         let restored = v.restore(&f, 1).unwrap();
         assert_eq!(restored.seq, 3);
         assert_eq!(fs::read(&f).unwrap(), b"sent to the client");
-        assert_eq!(v.status(&f).unwrap(), crate::model::ItemStatus::Ready);
+        assert_eq!(v.history(&f).unwrap().versions.len(), 3, "nothing was lost");
     }
 
     #[test]
@@ -180,17 +159,6 @@ mod tests {
         let f = dir.path().join("a.txt");
         fs::write(&f, b"x").unwrap();
         v.save(&f).unwrap();
-        assert!(v.mark_ready(&f, 9).is_err());
         assert!(v.restore(&f, 9).is_err());
-    }
-
-    #[test]
-    fn exporting_without_a_share_ready_version_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut v = vault(dir.path());
-        let f = dir.path().join("a.txt");
-        fs::write(&f, b"x").unwrap();
-        v.save(&f).unwrap();
-        assert!(matches!(v.export(&f, dir.path()), Err(CoreError::ShareReadyMissing)));
     }
 }

@@ -269,7 +269,7 @@ mod tests {
         let stats = t.engine.vault_stats().unwrap();
         assert_eq!((stats.items, stats.versions), (1, 1));
         assert_eq!(t.engine.history(&item).unwrap().len(), 1);
-        assert!(t.engine.item_status(&t.root().join("final.docx")).unwrap().is_some());
+        assert!(t.engine.is_tracked(&t.root().join("final.docx")));
     }
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(r.moved, 0, "{r:?}");
         assert_eq!(r.marked_missing, 1, "{r:?}");
         assert!(copy.exists());
-        assert_eq!(t.engine.item_status(&copy).unwrap(), None);
+        assert!(!t.engine.is_tracked(&copy));
     }
 
     #[cfg(unix)]

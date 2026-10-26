@@ -5,7 +5,7 @@ import { Popover } from "./Popover";
 
 const changedHistory = [
   version({ seq: 9, note: null }),
-  version({ seq: 8, isShareReady: true, note: "Sent to Acme for review" }),
+  version({ seq: 8, note: "Sent to Acme for review" }),
   version({ seq: 7 }),
   version({ seq: 6, note: "Pricing section added" }),
   version({ seq: 5 }),
@@ -13,20 +13,20 @@ const changedHistory = [
 
 function backend(over: Parameters<typeof mockBackend>[0] = {}) {
   return mockBackend({
-    recent: [item({ status: "changedSinceReady", latestSeq: 9 })],
+    recent: [item({ latestSeq: 9 })],
     history: { itm_01: changedHistory },
     stats: { items: 1, versions: 9, bytes: 3 * 1024 * 1024 },
     ...over,
   });
 }
 
-test("a file that changed since it was marked ready offers both actions and says so", async () => {
+test("the newest version of the latest file can be copied out, with nothing to mark", async () => {
   backend();
   renderWithClient(<Popover />);
   expect(await screen.findByRole("heading", { name: "Proposal_Acme.docx" })).toBeInTheDocument();
-  expect(await screen.findByText("Changed since v8, your share-ready version.")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Export v8" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Mark v9 ready" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Export v9" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Mark/ })).not.toBeInTheDocument();
+  expect(screen.queryByText(/ready/i)).not.toBeInTheDocument();
   expect(screen.getByText("Watching Client work")).toBeInTheDocument();
   expect(screen.getByText("Stored on this Mac, 3.0 MB, 9 versions")).toBeInTheDocument();
 });
@@ -38,39 +38,13 @@ test("the card shows the four newest layers only", async () => {
   expect(layers).toHaveLength(4);
 });
 
-test("a file that was never shared can only be marked ready", async () => {
-  backend({ recent: [item({ status: "notShared", latestSeq: 1 })], history: { itm_01: [version({ seq: 1, origin: "initial" })] } });
-  renderWithClient(<Popover />);
-  expect(await screen.findByRole("button", { name: "Mark v1 ready" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^Export/ })).not.toBeInTheDocument();
-});
-
-test("a file whose latest version is ready offers export only", async () => {
-  backend({
-    recent: [item({ status: "ready", latestSeq: 8 })],
-    history: { itm_01: [version({ seq: 8, isShareReady: true }), version({ seq: 7 })] },
-  });
-  renderWithClient(<Popover />);
-  expect(await screen.findByRole("button", { name: "Export v8" })).toBeInTheDocument();
-  expect(screen.getByText("v8 is ready to share.")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^Mark/ })).not.toBeInTheDocument();
-});
-
-test("marking a version ready sends that exact version", async () => {
-  const b = backend();
-  renderWithClient(<Popover />);
-  await userEvent.click(await screen.findByRole("button", { name: "Mark v9 ready" }));
-  await waitFor(() => expect(b.called("mark_ready")).toHaveLength(1));
-  expect(b.called("mark_ready")[0].args).toEqual({ item: "itm_01", version: "ver_09" });
-});
-
-test("export asks where to put the copy, then exports the ready version and offers Finder", async () => {
+test("export asks where to put the copy, then exports the newest version and offers Finder", async () => {
   const b = backend({ picked: "/Users/a/Sent" });
-  b.state.handlers.export = () => ({ destination: "/Users/a/Sent/Proposal_Acme.docx", versionId: "ver_08" });
+  b.state.handlers.export = () => ({ destination: "/Users/a/Sent/Proposal_Acme.docx", versionId: "ver_09" });
   renderWithClient(<Popover />);
-  await userEvent.click(await screen.findByRole("button", { name: "Export v8" }));
-  expect(await screen.findByText("Exported v8")).toBeInTheDocument();
-  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_08", destDir: "/Users/a/Sent" });
+  await userEvent.click(await screen.findByRole("button", { name: "Export v9" }));
+  expect(await screen.findByText("Exported v9")).toBeInTheDocument();
+  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_09", destDir: "/Users/a/Sent" });
   await userEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
   expect(b.called("reveal")[0].args).toEqual({ path: "/Users/a/Sent/Proposal_Acme.docx" });
 });
@@ -78,28 +52,27 @@ test("export asks where to put the copy, then exports the ready version and offe
 test("cancelling the folder picker exports nothing", async () => {
   const b = backend({ picked: null });
   renderWithClient(<Popover />);
-  await userEvent.click(await screen.findByRole("button", { name: "Export v8" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Export v9" }));
   await waitFor(() => expect(b.called("plugin:dialog|open")).toHaveLength(1));
   expect(b.called("export")).toHaveLength(0);
 });
 
-// Review Focus 3: the ready version changed between rendering and clicking.
 test("an export that the backend refuses explains what happened and what to do", async () => {
   const b = backend({ picked: "/Users/a/Sent" });
   b.state.handlers.export = () => {
-    throw { code: "share_ready_changed", title: "The ready version changed", hint: "Look at the current ready version and export again." };
+    throw { code: "version_missing", title: "That version isn't there", hint: "Open the history again and pick another version." };
   };
   renderWithClient(<Popover />);
-  await userEvent.click(await screen.findByRole("button", { name: "Export v8" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Export v9" }));
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("The ready version changed");
-  expect(alert).toHaveTextContent("Look at the current ready version and export again.");
+  expect(alert).toHaveTextContent("That version isn't there");
+  expect(alert).toHaveTextContent("Open the history again and pick another version.");
   await userEvent.click(within(alert).getByRole("button", { name: "Dismiss" }));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 test("a removed file says so and only offers its history", async () => {
-  backend({ recent: [item({ missing: true, status: "notShared", latestSeq: 3 })], history: { itm_01: [version({ seq: 3 })] } });
+  backend({ recent: [item({ missing: true, latestSeq: 3 })], history: { itm_01: [version({ seq: 3 })] } });
   renderWithClient(<Popover />);
   expect(await screen.findByText("This file was removed from its folder. Its versions are still saved.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^(Export|Mark)/ })).not.toBeInTheDocument();
@@ -176,13 +149,3 @@ test("Escape closes the popover", async () => {
   await waitFor(() => expect(b.called("hide_popover")).toHaveLength(1));
 });
 
-test("after marking a version ready its layer plays the one animation the design allows", async () => {
-  const b = backend();
-  renderWithClient(<Popover />);
-  await userEvent.click(await screen.findByRole("button", { name: "Mark v9 ready" }));
-  await waitFor(() => expect(b.called("mark_ready")).toHaveLength(1));
-  b.state.history.itm_01 = [version({ seq: 9, isShareReady: true }), ...changedHistory.slice(1).map((v) => ({ ...v, isShareReady: false }))];
-  b.state.recent = [item({ status: "ready", latestSeq: 9 })];
-  await waitFor(() => expect(document.querySelector(".band--just-marked")).not.toBeNull());
-  expect(await screen.findByText("v9 is ready to share")).toBeInTheDocument();
-});

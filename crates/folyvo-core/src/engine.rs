@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -11,11 +11,10 @@ use crate::error::{CoreError, Result};
 use crate::export::{ExportResult, Exporter};
 use crate::ignore::{is_ignored, is_ignored_under};
 use crate::ingest::{IngestOutcome, Ingestor};
-use crate::model::{version_codes, ContentHash, ItemId, ItemStatus, Version, VersionId, VersionOrigin};
+use crate::model::{version_codes, ContentHash, ItemId, Version, VersionId, VersionOrigin};
 use crate::ports::{Clock, IdGen};
 use crate::reconcile;
 use crate::restore::Restorer;
-use crate::share;
 use crate::store::{repo, Store};
 
 pub use tokio::sync::broadcast::error::RecvError;
@@ -29,9 +28,6 @@ pub enum EngineEvent {
     VersionCreated {
         item: ItemId,
         version: VersionId,
-    },
-    ShareReadyChanged {
-        item: ItemId,
     },
     Exported {
         item: ItemId,
@@ -52,7 +48,6 @@ pub struct ItemSummary {
     pub item_id: ItemId,
     pub name: String,
     pub path: Option<String>,
-    pub status: ItemStatus,
     pub latest_seq: i64,
     pub latest_at: i64,
     pub missing: bool,
@@ -67,7 +62,6 @@ pub struct VersionView {
     pub content_hash: ContentHash,
     pub origin: VersionOrigin,
     pub note: Option<String>,
-    pub is_share_ready: bool,
     /// Short code for this version, unique within its item (see `model::version_codes`).
     pub code: String,
 }
@@ -95,7 +89,8 @@ pub struct Engine {
     vault: PathBuf,
     vault_key: String,
     inner: Mutex<Inner>,
-    status: RwLock<HashMap<String, ItemStatus>>,
+    /// Canonical keys of items that are tracked and not missing, readable without the writer lock.
+    tracked: RwLock<HashSet<String>>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     events: broadcast::Sender<EngineEvent>,
@@ -132,7 +127,7 @@ impl Engine {
             vault: vault.to_path_buf(),
             vault_key,
             inner: Mutex::new(Inner { store, cas }),
-            status: RwLock::new(HashMap::new()),
+            tracked: RwLock::new(HashSet::new()),
             clock,
             ids,
             events,
@@ -142,7 +137,7 @@ impl Engine {
             let items: Vec<ItemId> =
                 repo::all_current(g.store.conn())?.into_iter().map(|(i, _, _)| i).collect();
             for item in &items {
-                engine.refresh_status(&g, item)?;
+                engine.refresh_tracked(&g, item)?;
             }
         }
         Ok(engine)
@@ -156,22 +151,18 @@ impl Engine {
         let _ = self.events.send(event); // no listeners is fine
     }
 
-    /// Recompute the cached badge for one item. Missing items have no badge.
-    fn refresh_status(&self, inner: &Inner, item: &ItemId) -> Result<()> {
+    /// Keep the tracked set in step with one item: present unless the item is missing.
+    fn refresh_tracked(&self, inner: &Inner, item: &ItemId) -> Result<()> {
         let c = inner.store.conn();
         let Some(key) = repo::current_key(c, item)? else {
             return Ok(());
         };
         let missing = repo::item_flags(c, item)?.map(|(_, m)| m).unwrap_or(false);
-        let status = if missing { None } else { Some(share::item_status(&inner.store, item)?) };
-        let mut map = self.status.write().unwrap_or_else(|p| p.into_inner());
-        match status {
-            Some(st) => {
-                map.insert(key, st);
-            }
-            None => {
-                map.remove(&key);
-            }
+        let mut set = self.tracked.write().unwrap_or_else(|p| p.into_inner());
+        if missing {
+            set.remove(&key);
+        } else {
+            set.insert(key);
         }
         Ok(())
     }
@@ -253,7 +244,7 @@ impl Engine {
         let outcome = Ingestor::new(&mut inner.store, &inner.cas, self.clock.as_ref(), self.ids.as_ref())
             .ingest(path)?;
         let item = outcome.version().item_id.clone();
-        self.refresh_status(inner, &item)?;
+        self.refresh_tracked(inner, &item)?;
         match &outcome {
             IngestOutcome::Created(v) => {
                 self.emit(EngineEvent::VersionCreated { item, version: v.id.clone() })
@@ -292,7 +283,7 @@ impl Engine {
         };
         let already = repo::item_flags(inner.store.conn(), item)?.map(|(_, m)| m).unwrap_or(false);
         repo::set_missing(inner.store.conn(), item, true)?;
-        self.status.write().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        self.tracked.write().unwrap_or_else(|p| p.into_inner()).remove(&key);
         if !already {
             self.emit(EngineEvent::ItemMissing { item: item.clone() });
         }
@@ -305,20 +296,20 @@ impl Engine {
         let old_key = repo::current_key(inner.store.conn(), item)?;
         reconcile::relocate(&mut inner.store, self.clock.as_ref(), item, new_path)?;
         if let Some(old) = old_key {
-            self.status.write().unwrap_or_else(|p| p.into_inner()).remove(&old);
+            self.tracked.write().unwrap_or_else(|p| p.into_inner()).remove(&old);
         }
-        self.refresh_status(inner, item)?;
+        self.refresh_tracked(inner, item)?;
         self.emit(EngineEvent::ItemUpdated { item: item.clone() });
         Ok(())
     }
 
-    pub fn item_status(&self, path: &Path) -> Result<Option<ItemStatus>> {
-        // A path that cannot be resolved (its folder is gone) simply has no badge. This never
-        // touches the writer lock, so Finder lookups do not wait behind a large save.
+    /// Whether Folyvo tracks this path (and the file is not missing). Never waits for the
+    /// writer lock, so the watcher can ask about every event.
+    pub fn is_tracked(&self, path: &Path) -> bool {
         let Ok(key) = canonical_key(path) else {
-            return Ok(None);
+            return false;
         };
-        Ok(self.status.read().unwrap_or_else(|p| p.into_inner()).get(&key).copied())
+        self.tracked.read().unwrap_or_else(|p| p.into_inner()).contains(&key)
     }
 
     fn summarize(inner: &Inner, item: &ItemId) -> Result<ItemSummary> {
@@ -330,7 +321,6 @@ impl Engine {
             item_id: item.clone(),
             name,
             path: repo::current_path(c, item)?,
-            status: share::item_status(&inner.store, item)?,
             latest_seq: latest.seq,
             latest_at: latest.created_at,
             missing,
@@ -348,7 +338,6 @@ impl Engine {
         if !repo::item_exists(c, item)? {
             return Err(CoreError::ItemMissing);
         }
-        let ready = repo::share_ready_version(c, item)?;
         let versions = repo::versions_newest_first(c, item)?;
         let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
         Ok(versions
@@ -356,7 +345,6 @@ impl Engine {
             .zip(codes)
             .map(|(v, code)| VersionView {
                 code,
-                is_share_ready: ready.as_ref() == Some(&v.id),
                 id: v.id,
                 seq: v.seq,
                 created_at: v.created_at,
@@ -377,18 +365,6 @@ impl Engine {
         }
     }
 
-    pub fn mark_share_ready(&self, item: &ItemId, version: &VersionId) -> Result<()> {
-        let mut g = self.lock();
-        let inner = &mut *g;
-        let before = repo::share_ready_version(inner.store.conn(), item)?;
-        share::mark_share_ready(&mut inner.store, self.clock.as_ref(), item, version)?;
-        if before.as_ref() != Some(version) {
-            self.refresh_status(inner, item)?;
-            self.emit(EngineEvent::ShareReadyChanged { item: item.clone() });
-        }
-        Ok(())
-    }
-
     pub fn export(&self, item: &ItemId, version: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
         let mut g = self.lock();
         let inner = &mut *g;
@@ -404,7 +380,7 @@ impl Engine {
         let before = repo::latest_version(inner.store.conn(), item)?.map(|v| v.seq).unwrap_or(0);
         let restored = Restorer::new(&mut inner.store, &inner.cas, self.clock.as_ref(), self.ids.as_ref())
             .restore(item, version)?;
-        self.refresh_status(inner, item)?;
+        self.refresh_tracked(inner, item)?;
         // Unsaved work captured before the overwrite is a version too: announce every new one, oldest first.
         let mut created: Vec<Version> = repo::versions_newest_first(inner.store.conn(), item)?
             .into_iter()
@@ -500,7 +476,7 @@ mod tests {
             t.events(),
             vec![EngineEvent::VersionCreated { item: v.item_id.clone(), version: v.id.clone() }]
         );
-        assert_eq!(t.engine.item_status(&p).unwrap(), Some(ItemStatus::NotShared));
+        assert!(t.engine.is_tracked(&p));
         t.engine.ingest_path(&p).unwrap();
         assert!(t.events().is_empty());
     }
@@ -518,28 +494,10 @@ mod tests {
     }
 
     #[test]
-    fn marking_share_ready_emits_an_event_and_the_badge_follows_later_saves() {
-        let mut t = setup();
-        let p = t.file("a.docx", b"one");
-        let v1 = t.save(&p, b"one");
-        t.events();
-        t.engine.mark_share_ready(&v1.item_id, &v1.id).unwrap();
-        assert_eq!(t.events(), vec![EngineEvent::ShareReadyChanged { item: v1.item_id.clone() }]);
-        assert_eq!(t.engine.item_status(&p).unwrap(), Some(ItemStatus::Ready));
-        t.save(&p, b"two");
-        assert_eq!(t.engine.item_status(&p).unwrap(), Some(ItemStatus::ChangedSinceReady));
-        t.engine.mark_share_ready(&v1.item_id, &v1.id).unwrap();
-        assert!(
-            t.events().iter().all(|e| !matches!(e, EngineEvent::ShareReadyChanged { .. })),
-            "re-marking the same version is silent"
-        );
-    }
-
-    #[test]
-    fn unknown_paths_have_no_status() {
+    fn unknown_paths_are_not_tracked() {
         let t = setup();
         let p = t.file("never-saved.docx", b"x");
-        assert_eq!(t.engine.item_status(&p).unwrap(), None);
+        assert!(!t.engine.is_tracked(&p));
     }
 
     #[test]
@@ -556,17 +514,15 @@ mod tests {
     }
 
     #[test]
-    fn history_is_newest_first_flags_the_marked_version_and_shows_names() {
+    fn history_is_newest_first_and_shows_names() {
         let mut t = setup();
         let p = t.file("a.docx", b"one");
         let v1 = t.save(&p, b"one");
         let v2 = t.save(&p, b"two");
-        t.engine.mark_share_ready(&v1.item_id, &v1.id).unwrap();
         t.engine.name_version(&v1.id, Some("Sent to Acme")).unwrap();
         let h = t.engine.history(&v1.item_id).unwrap();
         assert_eq!(h.iter().map(|v| v.seq).collect::<Vec<_>>(), vec![2, 1]);
         assert_eq!(h[0].id, v2.id);
-        assert!(!h[0].is_share_ready && h[1].is_share_ready);
         assert_eq!(h[1].note.as_deref(), Some("Sent to Acme"));
         t.engine.name_version(&v1.id, None).unwrap();
         assert_eq!(t.engine.history(&v1.item_id).unwrap()[1].note, None);
@@ -581,7 +537,6 @@ mod tests {
         let mut t = setup();
         let p = t.file("a.docx", b"payload");
         let v = t.save(&p, b"payload");
-        t.engine.mark_share_ready(&v.item_id, &v.id).unwrap();
         t.events();
         let out = t.dir.path().join("work").join("out");
         fs::create_dir(&out).unwrap();
@@ -621,10 +576,10 @@ mod tests {
         fs::remove_file(&p).unwrap();
         t.engine.mark_missing(&p).unwrap();
         assert_eq!(t.events(), vec![EngineEvent::ItemMissing { item: v.item_id.clone() }]);
-        assert_eq!(t.engine.item_status(&p).unwrap(), None);
+        assert!(!t.engine.is_tracked(&p));
         assert!(t.engine.list_recent(5).unwrap()[0].missing);
         t.save(&p, b"back");
-        assert_eq!(t.engine.item_status(&p).unwrap(), Some(ItemStatus::NotShared));
+        assert!(t.engine.is_tracked(&p));
         assert!(!t.engine.list_recent(5).unwrap()[0].missing);
     }
 
@@ -650,8 +605,8 @@ mod tests {
         let new = old.with_file_name("final.docx");
         fs::rename(&old, &new).unwrap();
         t.engine.move_item(&v.item_id, &new).unwrap();
-        assert_eq!(t.engine.item_status(&old).unwrap(), None);
-        assert_eq!(t.engine.item_status(&new).unwrap(), Some(ItemStatus::NotShared));
+        assert!(!t.engine.is_tracked(&old));
+        assert!(t.engine.is_tracked(&new));
         assert_eq!(t.engine.list_recent(5).unwrap()[0].name, "draft.docx");
         assert!(t.events().contains(&EngineEvent::ItemUpdated { item: v.item_id.clone() }));
     }
@@ -704,15 +659,14 @@ mod tests {
     }
 
     #[test]
-    fn reopening_the_vault_keeps_history_and_rebuilds_badges() {
+    fn reopening_the_vault_keeps_history_and_rebuilds_tracking() {
         let mut t = setup();
         let p = t.file("a.docx", b"one");
         let v = t.save(&p, b"one");
-        t.engine.mark_share_ready(&v.item_id, &v.id).unwrap();
         let vault = t.dir.path().join("vault");
         drop(t.engine);
         let again = Engine::open(&vault, t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
-        assert_eq!(again.item_status(&p).unwrap(), Some(ItemStatus::Ready));
+        assert!(again.is_tracked(&p));
         assert_eq!(again.history(&v.item_id).unwrap().len(), 1);
     }
 
@@ -798,7 +752,7 @@ mod tests {
     #[test]
     fn a_path_that_cannot_be_resolved_has_no_badge_instead_of_an_error() {
         let t = setup();
-        assert_eq!(t.engine.item_status(&t.dir.path().join("gone-folder/a.docx")).unwrap(), None);
+        assert!(!t.engine.is_tracked(&t.dir.path().join("gone-folder/a.docx")));
     }
 
     #[test]

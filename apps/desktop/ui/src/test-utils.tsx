@@ -11,7 +11,6 @@ export function item(over: Partial<ItemSummaryDto> = {}): ItemSummaryDto {
     itemId: "itm_01",
     name: "Proposal_Acme.docx",
     path: "/Users/a/Client work/Proposal_Acme.docx",
-    status: "notShared",
     latestSeq: 1,
     latestAt: Date.now() - 120_000,
     missing: false,
@@ -30,7 +29,6 @@ export function version(over: Partial<VersionDto> = {}): VersionDto {
     contentHash: "b3_00",
     origin: "auto",
     note: null,
-    isShareReady: false,
     ...over,
   };
 }

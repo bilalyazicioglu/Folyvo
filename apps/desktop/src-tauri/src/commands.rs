@@ -34,12 +34,6 @@ pub async fn name_version(rt: Rt<'_>, version: String, note: Option<String>) -> 
 }
 
 #[tauri::command]
-pub async fn mark_ready(rt: Rt<'_>, item: String, version: String) -> Result<(), UserError> {
-    let api = rt.api();
-    blocking(move || api.mark_ready(&item, &version)).await
-}
-
-#[tauri::command]
 pub async fn export(
     rt: Rt<'_>,
     item: String,

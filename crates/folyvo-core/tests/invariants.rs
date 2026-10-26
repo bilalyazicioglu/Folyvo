@@ -15,7 +15,6 @@ const CONTENTS: [&[u8]; 4] = [b"", b"alpha", b"beta beta", b"gamma gamma gamma"]
 enum Op {
     Write { file: usize, content: usize },
     Ingest { file: usize },
-    MarkLatest { file: usize },
     Export { file: usize },
     Restore { file: usize, nth: usize },
     Delete { file: usize },
@@ -26,7 +25,6 @@ fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         (f.clone(), 0..CONTENTS.len()).prop_map(|(file, content)| Op::Write { file, content }),
         f.clone().prop_map(|file| Op::Ingest { file }),
-        f.clone().prop_map(|file| Op::MarkLatest { file }),
         f.clone().prop_map(|file| Op::Export { file }),
         (f.clone(), 0usize..8).prop_map(|(file, nth)| Op::Restore { file, nth }),
         f.prop_map(|file| Op::Delete { file }),
@@ -43,7 +41,6 @@ struct World {
     clock: Arc<FakeClock>,
     item: [Option<ItemId>; FILES],
     exists: [bool; FILES],
-    marked: HashMap<ItemId, VersionId>,
     seen: HashMap<ItemId, HashSet<VersionId>>,
     materialised: Vec<(PathBuf, ContentHash)>,
 }
@@ -62,7 +59,6 @@ impl World {
             clock,
             item: [None, None],
             exists: [false; FILES],
-            marked: HashMap::new(),
             seen: HashMap::new(),
             materialised: vec![],
         }
@@ -98,24 +94,17 @@ impl World {
                 self.exists[file] = false;
                 self.engine.mark_missing(&self.path(file)).unwrap();
             }
-            Op::MarkLatest { file } => {
-                if let Some(item) = self.item[file].clone() {
-                    let latest = self.engine.history(&item).unwrap()[0].id.clone();
-                    self.engine.mark_share_ready(&item, &latest).unwrap();
-                    self.marked.insert(item, latest);
-                }
-            }
             Op::Export { file } => {
                 let Some(item) = self.item[file].clone() else { return };
-                let Some(marked) = self.marked.get(&item).cloned() else { return };
-                let r = self.engine.export(&item, &marked, &self.dir.path().join("out")).unwrap();
-                let marked_hash = self.hash_of(&item, &marked);
+                let latest = self.engine.history(&item).unwrap()[0].id.clone();
+                let r = self.engine.export(&item, &latest, &self.dir.path().join("out")).unwrap();
+                let latest_hash = self.hash_of(&item, &latest);
                 assert_eq!(
                     hash_file(&r.destination),
-                    marked_hash,
-                    "an export carries the marked version's bytes"
+                    latest_hash,
+                    "a copy carries the chosen version's bytes"
                 );
-                self.materialised.push((r.materialized, marked_hash));
+                self.materialised.push((r.materialized, latest_hash));
             }
             Op::Restore { file, nth } => {
                 let Some(item) = self.item[file].clone() else { return };

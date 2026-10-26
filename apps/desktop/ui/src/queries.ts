@@ -41,14 +41,3 @@ export function useAction() {
   };
   return { run, error, busy, clearError: () => setError(null) };
 }
-
-/** Remembers which layer was just marked ready, for about a second, so the layer can play its one animation. */
-export function useJustMarked() {
-  const [id, setId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!id) return;
-    const t = setTimeout(() => setId(null), 1_200);
-    return () => clearTimeout(t);
-  }, [id]);
-  return [id, setId] as const;
-}

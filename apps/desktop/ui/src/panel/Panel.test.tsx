@@ -5,14 +5,14 @@ import { Panel } from "./Panel";
 
 const history = [
   version({ seq: 4 }),
-  version({ seq: 3, isShareReady: true, note: "Sent to Acme" }),
+  version({ seq: 3, note: "Sent to Acme" }),
   version({ seq: 2 }),
   version({ seq: 1, origin: "initial" }),
 ];
 
 function backend(over: Parameters<typeof mockBackend>[0] = {}) {
   return mockBackend({
-    recent: [item({ status: "changedSinceReady", latestSeq: 4 })],
+    recent: [item({ latestSeq: 4 })],
     history: { itm_01: history },
     ...over,
   });
@@ -31,22 +31,23 @@ test("every version is a row, newest first, with the name and path of the file o
   expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Version 4", "Version 3", "Version 2", "Version 1"]);
 });
 
-test("actions depend on the row: no restore on the newest, no mark on the ready one", async () => {
+test("every row can be copied out, and every row but the newest can be restored", async () => {
   backend();
   renderWithClient(<Panel itemId="itm_01" />);
   await screen.findByRole("heading", { name: "Proposal_Acme.docx" });
   expect(within(row(4)).queryByRole("button", { name: "Restore v4" })).not.toBeInTheDocument();
-  expect(within(row(4)).getByRole("button", { name: "Mark v4 ready" })).toBeInTheDocument();
-  expect(within(row(3)).queryByRole("button", { name: "Mark v3 ready" })).not.toBeInTheDocument();
+  expect(within(row(4)).getByRole("button", { name: "Export v4" })).toBeInTheDocument();
+  expect(within(row(3)).getByRole("button", { name: "Export v3" })).toBeInTheDocument();
   expect(within(row(3)).getByRole("button", { name: "Restore v3" })).toBeInTheDocument();
 });
 
-test("marking an older version ready sends that version", async () => {
-  const b = backend();
+test("exporting an older version copies exactly that version", async () => {
+  const b = backend({ picked: "/Users/a/Sent" });
+  b.state.handlers.export = () => ({ destination: "/Users/a/Sent/Proposal_Acme.docx", versionId: "ver_02" });
   renderWithClient(<Panel itemId="itm_01" />);
-  await userEvent.click(await within(await screen.findByRole("listitem", { name: "Version 2" })).findByRole("button", { name: "Mark v2 ready" }));
-  await waitFor(() => expect(b.called("mark_ready")).toHaveLength(1));
-  expect(b.called("mark_ready")[0].args).toEqual({ item: "itm_01", version: "ver_02" });
+  await userEvent.click(await within(await screen.findByRole("listitem", { name: "Version 2" })).findByRole("button", { name: "Export v2" }));
+  expect(await screen.findByText("Exported v2")).toBeInTheDocument();
+  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_02", destDir: "/Users/a/Sent" });
 });
 
 // Review Focus 4: restore must explain that unsaved work is kept, and never run on the first click.
@@ -86,15 +87,6 @@ test("a version can be named and the name can be cleared", async () => {
   expect(b.called("name_version")[1].args).toEqual({ version: "ver_02", note: null });
 });
 
-test("the ready version can be exported from the top of the panel", async () => {
-  const b = backend({ picked: "/Users/a/Sent" });
-  b.state.handlers.export = () => ({ destination: "/Users/a/Sent/Proposal_Acme.docx", versionId: "ver_03" });
-  renderWithClient(<Panel itemId="itm_01" />);
-  await userEvent.click(await screen.findByRole("button", { name: "Export v3" }));
-  expect(await screen.findByText("Exported v3")).toBeInTheDocument();
-  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_03", destDir: "/Users/a/Sent" });
-});
-
 test("a removed file can be brought back from its newest version", async () => {
   backend({ recent: [item({ missing: true, latestSeq: 4 })] });
   renderWithClient(<Panel itemId="itm_01" />);
@@ -104,12 +96,12 @@ test("a removed file can be brought back from its newest version", async () => {
 });
 
 test("a backend error is shown with its title and hint", async () => {
-  const b = backend();
-  b.state.handlers.mark_ready = () => {
+  const b = backend({ picked: "/Users/a/Sent" });
+  b.state.handlers.export = () => {
     throw { code: "item_missing", title: "Folyvo can't find this file", hint: "It may have been removed from a watched folder." };
   };
   renderWithClient(<Panel itemId="itm_01" />);
-  await userEvent.click(await within(await screen.findByRole("listitem", { name: "Version 2" })).findByRole("button", { name: "Mark v2 ready" }));
+  await userEvent.click(await within(await screen.findByRole("listitem", { name: "Version 2" })).findByRole("button", { name: "Export v2" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Folyvo can't find this file");
 });
 

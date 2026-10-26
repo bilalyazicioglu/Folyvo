@@ -9,7 +9,8 @@ use folyvo_core::ingest::IngestOutcome;
 use folyvo_core::ports::{Clock, RandomIdGen, SystemClock};
 use folyvo_core::{CoreError, Vault};
 
-const USAGE: &str = "usage: folyvo save <file> | log <file> | ready <file> <vN> | export <file> <folder> | restore <file> <vN> | watch <folder>";
+const USAGE: &str =
+    "usage: folyvo save <file> | log <file> | export <file> <folder> | restore <file> <vN> | watch <folder>";
 
 fn vault_dir() -> PathBuf {
     if let Some(v) = std::env::var_os("FOLYVO_VAULT") {
@@ -45,17 +46,10 @@ fn run(args: &[String]) -> Result<String, String> {
             let h = open()?.history(&PathBuf::from(file)).map_err(|e| plain(e, file))?;
             Ok(strata::render(&h, clock.now_unix_ms()))
         }
-        ["ready", file, v] => {
-            let n = version_number(v)?;
-            open()?.mark_ready(&PathBuf::from(file), n).map_err(|e| plain(e, file))?;
-            Ok(format!("v{n} is ready to share\n"))
-        }
         ["export", file, folder] => {
             let mut vault = open()?;
             let path = PathBuf::from(file);
-            let seq = vault.history(&path).ok().and_then(|h| {
-                h.share_ready.and_then(|id| h.versions.iter().find(|v| v.id == id).map(|v| v.seq))
-            });
+            let seq = vault.history(&path).ok().and_then(|h| h.versions.first().map(|v| v.seq));
             let r = vault.export(&path, &PathBuf::from(folder)).map_err(|e| plain(e, file))?;
             Ok(format!("Exported v{} to {}\n", seq.unwrap_or_default(), r.destination.display()))
         }

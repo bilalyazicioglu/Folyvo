@@ -34,13 +34,10 @@ export function noteOf(v: VersionDto): string {
 }
 
 export const exportLabel = (seq: number) => `Export v${seq}`;
-export const markLabel = (seq: number) => `Mark v${seq} ready`;
-export const changedSince = (seq: number) => `Changed since v${seq}, your share-ready version.`;
 
-export type Band = "ready" | "latest" | "older-a" | "older-b";
+export type Band = "latest" | "older-a" | "older-b";
 
-export function bandOf(v: VersionDto, index: number): Band {
-  if (v.isShareReady) return "ready";
+export function bandOf(_v: VersionDto, index: number): Band {
   if (index === 0) return "latest";
   return index % 2 === 1 ? "older-a" : "older-b";
 }

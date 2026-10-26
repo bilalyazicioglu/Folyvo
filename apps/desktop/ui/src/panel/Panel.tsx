@@ -2,8 +2,8 @@ import { useState } from "react";
 import { api, AppError } from "../api";
 import { Band } from "../components/Band";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { useAction, useHistory, useJustMarked, useNow, useRecent } from "../queries";
-import { exportLabel, markLabel } from "../strata";
+import { useAction, useHistory, useNow, useRecent } from "../queries";
+import { exportLabel } from "../strata";
 import { NameField } from "./NameField";
 
 export function Panel({ itemId }: { itemId: string }) {
@@ -14,28 +14,20 @@ export function Panel({ itemId }: { itemId: string }) {
   const [naming, setNaming] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; reveal?: string } | null>(null);
-  const [justMarked, setJustMarked] = useJustMarked();
 
   const summary = recent.data?.find((i) => i.itemId === itemId);
   const versions = history.data ?? [];
-  const ready = versions.find((v) => v.isShareReady);
 
-  const exportReady = async () => {
-    if (!ready) return;
+  const exportRow = async (id: string, seq: number) => {
     const dir = await api.chooseFolder("Choose where to put the copy");
     if (!dir) return;
-    const r = await act.run(() => api.exportVersion(itemId, ready.id, dir));
-    if (r.ok) setNotice({ text: `Exported v${ready.seq}`, reveal: r.value.destination });
+    const r = await act.run(() => api.exportVersion(itemId, id, dir));
+    if (r.ok) setNotice({ text: `Exported v${seq}`, reveal: r.value.destination });
   };
 
   const saveName = async (id: string, value: string) => {
     await act.run(() => api.nameVersion(id, value.trim() === "" ? null : value));
     setNaming(null);
-  };
-
-  const markRow = async (id: string) => {
-    const r = await act.run(() => api.markReady(itemId, id));
-    if (r.ok) setJustMarked(id);
   };
 
   const restore = async (id: string, seq: number) => {
@@ -67,18 +59,10 @@ export function Panel({ itemId }: { itemId: string }) {
         </div>
       )}
 
-      {ready && (
-        <div className="panel__top">
-          <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void exportReady()}>
-            {exportLabel(ready.seq)}
-          </button>
-        </div>
-      )}
-
       <ul className="rows" style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {versions.map((v, i) => (
           <li key={v.id} className="row" aria-label={`Version ${v.seq}`}>
-            <Band version={v} index={i} now={now} justMarked={v.id === justMarked} />
+            <Band version={v} index={i} now={now} />
             {naming === v.id ? (
               <NameField seq={v.seq} initial={v.note ?? ""} busy={act.busy} onSave={(value) => void saveName(v.id, value)} onCancel={() => setNaming(null)} />
             ) : (
@@ -86,11 +70,9 @@ export function Panel({ itemId }: { itemId: string }) {
                 <button type="button" className="btn" aria-label={`Name v${v.seq}`} onClick={() => setNaming(v.id)}>
                   Name
                 </button>
-                {!v.isShareReady && (
-                  <button type="button" className="btn" disabled={act.busy} onClick={() => void markRow(v.id)}>
-                    {markLabel(v.seq)}
-                  </button>
-                )}
+                <button type="button" className="btn" disabled={act.busy} onClick={() => void exportRow(v.id, v.seq)}>
+                  {exportLabel(v.seq)}
+                </button>
                 {(i > 0 || summary?.missing) && (
                   <button type="button" className="btn" disabled={act.busy} onClick={() => setConfirming(v.id)}>
                     Restore v{v.seq}

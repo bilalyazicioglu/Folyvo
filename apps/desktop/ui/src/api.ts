@@ -36,7 +36,6 @@ export const api = {
   recent: (limit = 20) => call<ItemSummaryDto[]>("recent", { limit }),
   history: (item: string) => call<VersionDto[]>("history", { item }),
   nameVersion: (version: string, note: string | null) => call<void>("name_version", { version, note }),
-  markReady: (item: string, version: string) => call<void>("mark_ready", { item, version }),
   exportVersion: (item: string, expected: string, destDir: string) => call<ExportDto>("export", { item, expected, destDir }),
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
