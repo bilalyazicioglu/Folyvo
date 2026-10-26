@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ActivityDto } from "./generated/ActivityDto";
 import type { CopyDto } from "./generated/CopyDto";
@@ -36,6 +37,9 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
+/** A file dragged over the window ("over"), dragged away ("leave") or dropped. */
+export type DropEvent = { type: "over" } | { type: "leave" } | { type: "drop"; paths: string[] };
+
 export const api = {
   recent: (limit = 20) => call<ItemSummaryDto[]>("recent", { limit }),
   history: (item: string) => call<VersionDto[]>("history", { item }),
@@ -59,6 +63,13 @@ export const api = {
   /** The popover window follows the height of its content. */
   fitPopover: (height: number) => call<void>("fit_popover", { height }),
   reveal: (path: string) => call<void>("reveal", { path }),
+  /** Files dragged onto this window. Resolves to the function that stops listening. */
+  onDrop: (cb: (e: DropEvent) => void): Promise<() => void> =>
+    getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type === "drop") cb({ type: "drop", paths: payload.paths });
+      else if (payload.type === "leave") cb({ type: "leave" });
+      else cb({ type: "over" });
+    }),
   /** Native folder picker. Resolves to null when the person cancels. */
   chooseFolder: async (title: string): Promise<string | null> => {
     // The picker takes focus from the popover, which would hide it and the picker with it.

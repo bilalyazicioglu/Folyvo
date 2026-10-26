@@ -8,6 +8,10 @@ export const useHistory = (item?: string) =>
   useQuery({ queryKey: ["history", item], queryFn: () => api.history(item!), enabled: !!item });
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: api.stats });
 export const useFolders = () => useQuery({ queryKey: ["folders"], queryFn: api.folders });
+export const useActivity = (from: number, to: number) =>
+  useQuery({ queryKey: ["activity", from, to], queryFn: () => api.activity(from, to) });
+export const useCopies = (item?: string) =>
+  useQuery({ queryKey: ["copies", item], queryFn: () => api.copies(item!), enabled: !!item });
 
 /** Re-renders every half minute so "2 min ago" stays true. */
 export function useNow(): number {

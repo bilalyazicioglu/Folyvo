@@ -1,30 +1,49 @@
-import { useEffect, useState } from "react";
-import { api } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, AppError, INTERNAL_ERROR } from "../api";
 import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
-import { Strata } from "../components/Strata";
-import { useAction, useFolders, useHistory, useNow, useRecent, useStats } from "../queries";
-import { ago, exportLabel, folderName, storedLabel } from "../strata";
+import { useAction, useActivity, useFolders, useNow, useRecent } from "../queries";
+import { folderName } from "../strata";
+import { dayBounds, hourBuckets } from "../time";
+import { DropResult, type Dropped } from "./DropResult";
+import { FileRow } from "./FileRow";
+import { TodayStrip } from "./TodayStrip";
 
-interface Notice {
-  text: string;
-  reveal?: string;
+const ROWS = 8;
+
+function keeping(folders: { path: string }[]): string {
+  return folders.length === 1
+    ? `Keeping every save in ${folderName(folders[0].path)}`
+    : `Keeping every save in ${folders.length} folders`;
 }
 
-function watching(folders: { path: string }[]): string {
-  return folders.length === 1 ? `Watching ${folderName(folders[0].path)}` : `Watching ${folders.length} folders`;
+/** Tracked file → its history; anything else → which saved version it is, if any. */
+async function answerDrop(path: string): Promise<Dropped | null> {
+  try {
+    const item = await api.itemAt(path);
+    if (item) {
+      await api.openHistory(item);
+      return null;
+    }
+    return { kind: "matches", matches: await api.which(path) };
+  } catch (e) {
+    const error = e instanceof AppError ? e.info : INTERNAL_ERROR;
+    return error.code === "not_a_file" ? { kind: "folder" } : { kind: "error", error };
+  }
 }
 
 export function Popover() {
   const now = useNow();
+  const { from, to } = dayBounds(now);
   const folders = useFolders();
   const recent = useRecent();
-  const stats = useStats();
-  const current = recent.data?.[0];
-  const history = useHistory(current?.itemId);
+  const activity = useActivity(from, to);
   const act = useAction();
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const root = useRef<HTMLElement>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dropped, setDropped] = useState<Dropped | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,6 +51,23 @@ export function Popover() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const stop = api.onDrop((e) => {
+      if (e.type !== "drop") return setDragging(e.type === "over");
+      setDragging(false);
+      if (e.paths[0]) void answerDrop(e.paths[0]).then(setDropped);
+    });
+    return () => void stop.then((f) => f());
+  }, []);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => void api.fitPopover(el.getBoundingClientRect().height));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   const addFolder = async () => {
@@ -44,90 +80,66 @@ export function Popover() {
 
   const folderList = folders.data ?? [];
   const items = recent.data ?? [];
-  const versions = history.data ?? [];
-  const latest = versions[0];
-
-  const exportLatest = async () => {
-    if (!current || !latest) return;
-    const dir = await api.chooseFolder("Choose where to put the copy");
-    if (!dir) return;
-    const r = await act.run(() => api.exportVersion(current.itemId, latest.id, dir));
-    if (r.ok) setNotice({ text: `Exported v${latest.seq}`, reveal: r.value.destination });
-  };
+  const saves = [...(activity.data?.saves ?? [])].sort((a, b) => a.at - b.at);
+  const copies = [...(activity.data?.copies ?? [])].sort((a, b) => a.at - b.at);
+  const firstHour = hourBuckets(saves, now)[0].hour;
+  const start = new Date(from).setHours(firstHour);
 
   return (
-    <main className="popover" aria-label="Folyvo">
-      <header className="popover__head">
-        <h1>Folyvo</h1>
-        {folderList.length > 0 && <p>{watching(folderList)}</p>}
-      </header>
+    <main className="popover" aria-label="Folyvo" ref={root}>
+      {folderList.length > 0 && items.length > 0 && <TodayStrip saves={saves} now={now} />}
 
       {act.error && <ErrorNotice error={act.error} onDismiss={act.clearError} />}
-      {notice && !act.error && (
-        <div role="status" className="notice">
-          <div>{notice.text}</div>
-          {notice.reveal && (
-            <button type="button" className="btn btn--link" onClick={() => void api.reveal(notice.reveal!)}>
-              Show in Finder
-            </button>
-          )}
-          <button type="button" className="btn btn--link" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
+      {dropped && (
+        <DropResult
+          result={dropped}
+          now={now}
+          onOpenHistory={(item) => void api.openHistory(item)}
+          onDismiss={() => setDropped(null)}
+        />
       )}
 
       <div className="popover__body">
         {folderList.length === 0 ? (
           <NoFolders onChoose={() => void addFolder()} busy={act.busy} />
-        ) : !current ? (
+        ) : items.length === 0 ? (
           <WaitingForSave folder={folderName(folderList[0].path)} />
         ) : (
-          <>
-            <section className="card" aria-label={current.name}>
-              <div className="card__title">
-                <h2 title={current.path ?? current.name}>{current.name}</h2>
-                <span>{ago(current.latestAt, now)}</span>
-              </div>
-              {current.missing && (
-                <p className="card__status">This file was removed from its folder. Its versions are still saved.</p>
-              )}
-              <Strata versions={versions} now={now} limit={4} />
-              {!current.missing && latest && (
-                <div className="card__actions">
-                  <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void exportLatest()}>
-                    {exportLabel(latest.seq)}
-                  </button>
-                </div>
-              )}
-              <button type="button" className="btn btn--link" onClick={() => void api.openHistory(current.itemId)}>
-                All versions
-              </button>
-            </section>
-
-            {items.length > 1 && (
-              <>
-                <h2 className="section-title">Recent</h2>
-                <ul className="recent">
-                  {items.slice(1, 6).map((it) => (
-                    <li key={it.itemId}>
-                      <button type="button" onClick={() => void api.openHistory(it.itemId)}>
-                        <span className="name">{it.name}</span>
-                        <span className="when">{ago(it.latestAt, now)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
-        )}
-        {folderList.length > 0 && (
-          <FolderList folders={folderList} onAdd={() => void addFolder()} onRemove={removeFolder} busy={act.busy} />
+          <ul className="rows">
+            {items.slice(0, ROWS).map((it) => (
+              <FileRow
+                key={it.itemId}
+                item={it}
+                saves={saves.filter((s) => s.itemId === it.itemId)}
+                copies={copies.filter((c) => c.itemId === it.itemId)}
+                now={now}
+                start={start}
+                open={openId === it.itemId}
+                onToggle={() => setOpenId(openId === it.itemId ? null : it.itemId)}
+                onOpenHistory={() => void api.openHistory(it.itemId)}
+              />
+            ))}
+          </ul>
         )}
       </div>
 
-      {stats.data && <footer className="popover__foot">{storedLabel(stats.data)}</footer>}
+      {folderList.length > 0 && (
+        <footer className="popover__foot">
+          <div className="popover__keeping">
+            <p>{keeping(folderList)}</p>
+            <button type="button" className="btn btn--link" disabled={act.busy} onClick={() => void addFolder()}>
+              Add Folder…
+            </button>
+          </div>
+          <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} />
+        </footer>
+      )}
+
+      {dragging && (
+        <div className="drop-overlay" aria-live="polite">
+          <p>Drop a file to see which saved version it is</p>
+        </div>
+      )}
     </main>
   );
 }
