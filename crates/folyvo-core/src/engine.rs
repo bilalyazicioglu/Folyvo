@@ -8,10 +8,12 @@ use tokio::sync::broadcast;
 use crate::canonical::canonical_key;
 use crate::cas::Cas;
 use crate::error::{CoreError, Result};
+use crate::events;
 use crate::export::{ExportResult, Exporter};
+use crate::handed;
 use crate::ignore::{is_ignored, is_ignored_under};
 use crate::ingest::{IngestOutcome, Ingestor};
-use crate::model::{version_codes, ContentHash, ItemId, Version, VersionId, VersionOrigin};
+use crate::model::{version_codes, ContentHash, ItemId, ShareEvent, Version, VersionId, VersionOrigin};
 use crate::ports::{Clock, IdGen};
 use crate::reconcile;
 use crate::restore::Restorer;
@@ -32,6 +34,11 @@ pub enum EngineEvent {
     Exported {
         item: ItemId,
         destination: PathBuf,
+    },
+    /// A copy went to another app through the share sheet.
+    Handed {
+        item: ItemId,
+        version: VersionId,
     },
     ItemMissing {
         item: ItemId,
@@ -374,6 +381,29 @@ impl Engine {
         Ok(result)
     }
 
+    /// A read-only file named like the item that holds `version`, for previews and the share sheet.
+    pub fn materialise(&self, item: &ItemId, version: &VersionId) -> Result<PathBuf> {
+        let g = self.lock();
+        handed::materialise(&g.store, &g.cas, item, version)
+    }
+
+    /// Record that `version` was handed to another app (`service`: see `handed::validate_service`).
+    pub fn record_handed(&self, item: &ItemId, version: &VersionId, service: &str) -> Result<ShareEvent> {
+        let mut g = self.lock();
+        let event = handed::record_handed(&mut g.store, self.clock.as_ref(), item, version, service)?;
+        self.emit(EngineEvent::Handed { item: item.clone(), version: version.clone() });
+        Ok(event)
+    }
+
+    /// Copies saved and handed out for `item`, oldest first.
+    pub fn events(&self, item: &ItemId) -> Result<Vec<ShareEvent>> {
+        let g = self.lock();
+        if !repo::item_exists(g.store.conn(), item)? {
+            return Err(CoreError::ItemMissing);
+        }
+        events::share_events(&g.store, item)
+    }
+
     pub fn restore(&self, item: &ItemId, version: &VersionId) -> Result<Version> {
         let mut g = self.lock();
         let inner = &mut *g;
@@ -498,6 +528,20 @@ mod tests {
         let t = setup();
         let p = t.file("never-saved.docx", b"x");
         assert!(!t.engine.is_tracked(&p));
+    }
+
+    #[test]
+    fn recording_a_handed_copy_emits_an_event() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        t.events();
+        let copy = t.engine.materialise(&v.item_id, &v.id).unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), b"one");
+        let ev = t.engine.record_handed(&v.item_id, &v.id, "airdrop").unwrap();
+        assert_eq!(t.events(), vec![EngineEvent::Handed { item: v.item_id.clone(), version: v.id.clone() }]);
+        assert_eq!(t.engine.events(&v.item_id).unwrap(), vec![ev]);
+        assert!(t.engine.ingest_path(&copy).unwrap().is_none(), "the materialised copy is never ingested");
     }
 
     #[test]

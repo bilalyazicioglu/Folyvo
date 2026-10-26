@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::canonical::canonical_key;
 use crate::cas::Cas;
 use crate::error::{CoreError, Result};
-use crate::model::{ContentHash, ItemId, ShareEvent, ShareEventKind, VersionId};
+use crate::model::{ContentHash, ItemId, ShareEvent, ShareEventKind, Version, VersionId};
 use crate::ports::Clock;
 use crate::store::{repo, Store};
 
@@ -28,26 +28,12 @@ impl<'a> Exporter<'a> {
     }
 
     pub fn export(&mut self, item: &ItemId, version: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
-        let (version, name) = {
-            let c = self.store.conn();
-            if !repo::item_exists(c, item)? {
-                return Err(CoreError::ItemMissing);
-            }
-            let version = match repo::version(c, version)? {
-                Some(v) if &v.item_id == item => v,
-                _ => return Err(CoreError::VersionMissing(version.clone())),
-            };
-            let name = repo::current_path(c, item)?
-                .and_then(|p| Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()))
-                .or(repo::display_name(c, item)?)
-                .unwrap_or_else(|| "file".to_string());
-            (version, name)
-        };
+        let (version, name) = resolve(self.store.conn(), item, version)?;
         if !dest_dir.is_dir() {
             return Err(CoreError::io(dest_dir, std::io::Error::from(std::io::ErrorKind::NotFound)));
         }
 
-        let materialized = self.materialize(item, &version.content_hash, &name)?;
+        let materialized = materialize(self.cas, item, &version.content_hash, &name)?;
         let destination = copy_no_clobber(&materialized, dest_dir, &name)?;
 
         let now = self.clock.now_unix_ms();
@@ -66,35 +52,56 @@ impl<'a> Exporter<'a> {
         )?;
         Ok(ExportResult { destination, materialized, version_id: version.id })
     }
+}
 
-    fn materialize(&self, item: &ItemId, hash: &ContentHash, name: &str) -> Result<PathBuf> {
-        let source = self.cas.path_of(hash);
-        if !source.is_file() {
-            return Err(CoreError::ObjectMissing(hash.clone()));
-        }
-        let base = self.cas.root().join("exports").join(item.as_str()).join(hash.as_str());
-        for generation in 1u32.. {
-            let dir = base.join(format!("g{generation}"));
-            let path = dir.join(name);
-            if path.exists() {
-                if &file_hash(&path)? == hash {
-                    return Ok(path);
-                }
-                continue; // tampered: never rewrite, try the next generation
-            }
-            self.cas.verify(hash)?; // never materialise bit-rotted bytes
-            fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
-            let tmp = dir.join(format!(".part-{}", uuid::Uuid::new_v4().simple()));
-            reflink_copy::reflink_or_copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
-            make_read_only(&tmp)?;
-            fs::rename(&tmp, &path).map_err(|e| {
-                let _ = fs::remove_file(&tmp);
-                CoreError::io(&path, e)
-            })?;
-            return Ok(path);
-        }
-        unreachable!("generation counter is unbounded")
+/// The version (which must belong to `item`) and the name a copy of it should carry: the working
+/// file's current name, else the last name Folyvo knew.
+pub(crate) fn resolve(
+    c: &rusqlite::Connection,
+    item: &ItemId,
+    version: &VersionId,
+) -> Result<(Version, String)> {
+    if !repo::item_exists(c, item)? {
+        return Err(CoreError::ItemMissing);
     }
+    let version = match repo::version(c, version)? {
+        Some(v) if &v.item_id == item => v,
+        _ => return Err(CoreError::VersionMissing(version.clone())),
+    };
+    let name = repo::current_path(c, item)?
+        .and_then(|p| Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()))
+        .or(repo::display_name(c, item)?)
+        .unwrap_or_else(|| "file".to_string());
+    Ok((version, name))
+}
+
+pub(crate) fn materialize(cas: &Cas, item: &ItemId, hash: &ContentHash, name: &str) -> Result<PathBuf> {
+    let source = cas.path_of(hash);
+    if !source.is_file() {
+        return Err(CoreError::ObjectMissing(hash.clone()));
+    }
+    let base = cas.root().join("exports").join(item.as_str()).join(hash.as_str());
+    for generation in 1u32.. {
+        let dir = base.join(format!("g{generation}"));
+        let path = dir.join(name);
+        if path.exists() {
+            if &file_hash(&path)? == hash {
+                return Ok(path);
+            }
+            continue; // tampered: never rewrite, try the next generation
+        }
+        cas.verify(hash)?; // never materialise bit-rotted bytes
+        fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
+        let tmp = dir.join(format!(".part-{}", uuid::Uuid::new_v4().simple()));
+        reflink_copy::reflink_or_copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
+        make_read_only(&tmp)?;
+        fs::rename(&tmp, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            CoreError::io(&path, e)
+        })?;
+        return Ok(path);
+    }
+    unreachable!("generation counter is unbounded")
 }
 
 pub(crate) fn file_hash(path: &Path) -> Result<ContentHash> {
