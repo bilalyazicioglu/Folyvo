@@ -128,6 +128,15 @@ pub(crate) fn versions_newest_first(c: &Connection, item: &ItemId) -> Result<Vec
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Every version holding exactly `hash`, across items, earliest first.
+pub(crate) fn versions_by_hash(c: &Connection, hash: &ContentHash) -> Result<Vec<Version>> {
+    let mut stmt = c.prepare(&format!(
+        "SELECT {VERSION_COLS} FROM versions WHERE content_hash = ?1 ORDER BY created_at ASC, item_id ASC, seq ASC"
+    ))?;
+    let rows = stmt.query_map([hash.as_str()], row_to_version)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub(crate) fn item_exists(c: &Connection, item: &ItemId) -> Result<bool> {
     Ok(c.query_row("SELECT 1 FROM items WHERE id = ?1", [item.as_str()], |_| Ok(())).optional()?.is_some())
 }
