@@ -4,7 +4,9 @@ use std::sync::Arc;
 use folyvo_core::engine::Engine;
 use folyvo_core::model::{ItemId, VersionId};
 
-use crate::dto::{ExportDto, ItemSummaryDto, RestoreDto, VaultStatsDto, VersionDto};
+use crate::dto::{
+    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MatchDto, RestoreDto, VaultStatsDto, VersionDto,
+};
 use crate::errors::UserError;
 
 const MAX_NAME_CHARS: usize = 200;
@@ -41,9 +43,35 @@ impl AppApi {
         Ok(self.engine.name_version(&version, note.as_deref())?)
     }
 
-    pub fn export(&self, item: &str, expected: &str, dest_dir: &str) -> Result<ExportDto, UserError> {
-        let (item, expected) = (ItemId::parse(item)?, VersionId::parse(expected)?);
-        Ok(self.engine.export(&item, &expected, Path::new(dest_dir))?.into())
+    /// Copy `version` into `dest_dir`.
+    pub fn export(&self, item: &str, version: &str, dest_dir: &str) -> Result<ExportDto, UserError> {
+        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        Ok(self.engine.export(&item, &version, Path::new(dest_dir))?.into())
+    }
+
+    /// Saves and copies with `from <= time < to` (unix milliseconds).
+    pub fn activity(&self, from: i64, to: i64) -> Result<ActivityDto, UserError> {
+        let (saves, copies) = self.engine.activity(from, to)?;
+        Ok(ActivityDto {
+            saves: saves.into_iter().map(Into::into).collect(),
+            copies: copies.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    /// Copies of an item's versions, oldest first.
+    pub fn copies(&self, item: &str) -> Result<Vec<CopyDto>, UserError> {
+        let item = ItemId::parse(item)?;
+        Ok(self.engine.events(&item)?.into_iter().map(Into::into).collect())
+    }
+
+    /// The item Folyvo tracks at `path`, if any.
+    pub fn item_at(&self, path: &str) -> Result<Option<String>, UserError> {
+        Ok(self.engine.item_at(Path::new(path))?.map(|i| i.to_string()))
+    }
+
+    /// Saved versions whose content is exactly the file at `path`.
+    pub fn which(&self, path: &str) -> Result<Vec<MatchDto>, UserError> {
+        Ok(self.engine.which_one(Path::new(path))?.into_iter().map(Into::into).collect())
     }
 
     pub fn restore(&self, item: &str, version: &str) -> Result<RestoreDto, UserError> {
@@ -59,6 +87,7 @@ impl AppApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::CopyKind;
     use folyvo_core::ports::{FakeClock, SeqIdGen};
     use std::fs;
     use std::path::PathBuf;
@@ -97,6 +126,76 @@ mod tests {
         fn out(&self) -> String {
             self.dir.path().join("out").to_string_lossy().into_owned()
         }
+    }
+
+    #[test]
+    fn activity_lists_todays_saves_and_copies() {
+        let r = rig();
+        r.save("a.docx", b"one");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        r.engine
+            .record_handed(&ItemId::parse(&item).unwrap(), &VersionId::parse(&v).unwrap(), "mail")
+            .unwrap();
+        let a = r.api.activity(0, 2_000).unwrap();
+        assert_eq!(a.saves.len(), 1);
+        assert_eq!(
+            (a.saves[0].item_id.as_str(), a.saves[0].version_id.as_str(), a.saves[0].at),
+            (item.as_str(), v.as_str(), 1_000)
+        );
+        assert_eq!(a.copies.len(), 1);
+        assert_eq!(a.copies[0].service.as_deref(), Some("mail"));
+        assert!(r.api.activity(2_000, 3_000).unwrap().saves.is_empty());
+    }
+
+    #[test]
+    fn copies_lists_saved_and_handed_copies_in_order() {
+        let r = rig();
+        r.save("a.docx", b"one");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        r.api.export(&item, &v, &r.out()).unwrap();
+        r.engine
+            .record_handed(&ItemId::parse(&item).unwrap(), &VersionId::parse(&v).unwrap(), "airdrop")
+            .unwrap();
+        let c = r.api.copies(&item).unwrap();
+        assert_eq!(c.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![CopyKind::Saved, CopyKind::Handed]);
+        assert!(c[0].target_path.is_some() && c[1].service.as_deref() == Some("airdrop"));
+    }
+
+    #[test]
+    fn item_at_names_a_tracked_file() {
+        let r = rig();
+        let p = r.save("a.docx", b"one");
+        assert_eq!(r.api.item_at(p.to_str().unwrap()).unwrap(), Some(r.item()));
+        assert_eq!(r.api.item_at(r.dir.path().join("nope.docx").to_str().unwrap()).unwrap(), None);
+    }
+
+    #[test]
+    fn which_finds_a_copy_and_says_nothing_for_an_edited_one() {
+        let r = rig();
+        r.save("Teklif.docx", b"one");
+        let copy = r.dir.path().join("back.docx");
+        fs::write(&copy, b"one").unwrap();
+        let m = r.api.which(copy.to_str().unwrap()).unwrap();
+        assert_eq!((m.len(), m[0].name.as_str()), (1, "Teklif.docx"));
+        fs::write(&copy, b"one, edited").unwrap();
+        assert!(r.api.which(copy.to_str().unwrap()).unwrap().is_empty());
+        assert_eq!(r.api.which(r.dir.path().to_str().unwrap()).unwrap_err().code, "not_a_file");
+        assert_eq!(
+            r.api.which(r.dir.path().join("nope").to_str().unwrap()).unwrap_err().code,
+            "file_unavailable"
+        );
+    }
+
+    #[test]
+    fn export_takes_the_version_to_copy() {
+        let r = rig();
+        r.save("a.docx", b"one");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        let out = r.api.export(&item, &v, &r.out()).unwrap();
+        assert_eq!(out.version_id, v);
     }
 
     #[test]

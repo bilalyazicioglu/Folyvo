@@ -44,7 +44,7 @@ test("export asks where to put the copy, then exports the newest version and off
   renderWithClient(<Popover />);
   await userEvent.click(await screen.findByRole("button", { name: "Export v9" }));
   expect(await screen.findByText("Exported v9")).toBeInTheDocument();
-  expect(b.called("export")[0].args).toEqual({ item: "itm_01", expected: "ver_09", destDir: "/Users/a/Sent" });
+  expect(b.called("export")[0].args).toEqual({ item: "itm_01", version: "ver_09", destDir: "/Users/a/Sent" });
   await userEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
   expect(b.called("reveal")[0].args).toEqual({ path: "/Users/a/Sent/Proposal_Acme.docx" });
 });

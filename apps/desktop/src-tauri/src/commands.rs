@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::dto::{ExportDto, FolderDto, ItemSummaryDto, RestoreDto, VaultStatsDto, VersionDto};
+use crate::dto::{
+    ActivityDto, CopyDto, ExportDto, FolderDto, ItemSummaryDto, MatchDto, RestoreDto, VaultStatsDto,
+    VersionDto,
+};
 use crate::errors::UserError;
 use crate::runtime::AppRuntime;
 
@@ -37,11 +40,35 @@ pub async fn name_version(rt: Rt<'_>, version: String, note: Option<String>) -> 
 pub async fn export(
     rt: Rt<'_>,
     item: String,
-    expected: String,
+    version: String,
     dest_dir: String,
 ) -> Result<ExportDto, UserError> {
     let api = rt.api();
-    blocking(move || api.export(&item, &expected, &dest_dir)).await
+    blocking(move || api.export(&item, &version, &dest_dir)).await
+}
+
+#[tauri::command]
+pub async fn activity(rt: Rt<'_>, from: i64, to: i64) -> Result<ActivityDto, UserError> {
+    let api = rt.api();
+    blocking(move || api.activity(from, to)).await
+}
+
+#[tauri::command]
+pub async fn copies(rt: Rt<'_>, item: String) -> Result<Vec<CopyDto>, UserError> {
+    let api = rt.api();
+    blocking(move || api.copies(&item)).await
+}
+
+#[tauri::command]
+pub async fn item_at(rt: Rt<'_>, path: String) -> Result<Option<String>, UserError> {
+    let api = rt.api();
+    blocking(move || api.item_at(&path)).await
+}
+
+#[tauri::command]
+pub async fn which(rt: Rt<'_>, path: String) -> Result<Vec<MatchDto>, UserError> {
+    let api = rt.api();
+    blocking(move || api.which(&path)).await
 }
 
 #[tauri::command]
