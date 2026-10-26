@@ -126,12 +126,11 @@ export function Popover() {
       {folderList.length > 0 && (
         <footer className="popover__foot">
           <div className="popover__keeping">
-            <p>{keeping(folderList)}</p>
+            <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} summary={keeping(folderList)} />
             <button type="button" className="btn btn--link" disabled={act.busy} onClick={() => void addFolder()}>
               Add Folder…
             </button>
           </div>
-          <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} />
         </footer>
       )}
 

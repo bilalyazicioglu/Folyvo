@@ -8,12 +8,14 @@ interface Props {
   onRemove: (path: string) => void;
   busy: boolean;
   defaultOpen?: boolean;
+  /** The line that opens the list; defaults to the folder count. */
+  summary?: string;
 }
 
-export function FolderList({ folders, onAdd, onRemove, busy, defaultOpen }: Props) {
+export function FolderList({ folders, onAdd, onRemove, busy, defaultOpen, summary }: Props) {
   return (
     <details className="folders" open={defaultOpen}>
-      <summary>Watched folders ({folders.length})</summary>
+      <summary>{summary ?? `Watched folders (${folders.length})`}</summary>
       <ul>
         {folders.map((f) => (
           <li key={f.path}>
