@@ -8,6 +8,7 @@ use crate::error::{CoreError, Result};
 use crate::events::share_events;
 use crate::export::{ExportResult, Exporter};
 use crate::ingest::{IngestOutcome, Ingestor};
+use crate::lock::VaultLock;
 use crate::model::{version_codes, ItemId, ShareEvent, Version, VersionId};
 use crate::ports::{Clock, IdGen};
 use crate::restore::Restorer;
@@ -28,6 +29,8 @@ pub struct History {
 }
 
 pub struct Vault {
+    /// Keeps the desktop app from sweeping objects this process is still writing.
+    _lock: VaultLock,
     store: Store,
     cas: Cas,
     clock: Arc<dyn Clock>,
@@ -38,8 +41,10 @@ impl Vault {
     pub fn open(dir: &Path, clock: Arc<dyn Clock>, ids: Arc<dyn IdGen>) -> Result<Vault> {
         fs::create_dir_all(dir).map_err(|e| CoreError::io(dir, e))?;
         let cas = Cas::open(dir)?;
+        let (lock, _) = VaultLock::acquire(dir)?;
+        lock.share()?;
         let store = Store::open(&dir.join("folyvo.db"))?;
-        Ok(Vault { store, cas, clock, ids })
+        Ok(Vault { store, cas, clock, ids, _lock: lock })
     }
 
     pub fn save(&mut self, path: &Path) -> Result<IngestOutcome> {
