@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { startEventBridge } from "./events";
-import { Panel } from "./panel/Panel";
 import { Popover } from "./popover/Popover";
 import "./styles/app.css";
+import { Versions } from "./versions/Versions";
 
 async function start() {
   const params = new URLSearchParams(window.location.search);
@@ -15,7 +15,7 @@ async function start() {
   void startEventBridge(client);
   createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={client}>
-      {params.get("view") === "versions" ? <Panel itemId={params.get("item") ?? ""} /> : <Popover />}
+      {params.get("view") === "versions" ? <Versions itemId={params.get("item") ?? ""} /> : <Popover />}
     </QueryClientProvider>,
   );
 }
