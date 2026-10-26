@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use folyvo_core::ports::{RandomIdGen, SystemClock};
-use folyvo_desktop::dto::{EngineEventDto, StatusDto};
+use folyvo_desktop::dto::EngineEventDto;
 use folyvo_desktop::runtime::{AppRuntime, Notifier};
 
 struct Silent;
@@ -45,21 +45,18 @@ fn the_whole_loop_works_through_the_app_api() {
     wait_until("v1", || api.recent(5).unwrap().first().map(|i| i.latest_seq) == Some(1));
     let item = api.recent(5).unwrap()[0].item_id.clone();
 
-    // 2. Mark it ready and export it.
+    // 2. Copy that version out.
     let v1 = api.history(&item).unwrap()[0].id.clone();
-    api.mark_ready(&item, &v1).unwrap();
     let exported = api.export(&item, &v1, out.to_str().unwrap()).unwrap();
     assert_eq!(fs::read(&exported.destination).unwrap(), b"first draft");
 
-    // 3. Keep working: the item reads "changed since ready".
+    // 3. Keep working: a second version.
     fs::write(&file, b"second draft, with pricing").unwrap();
     wait_until("v2", || api.recent(5).unwrap()[0].latest_seq == 2);
-    assert_eq!(api.recent(5).unwrap()[0].status, StatusDto::ChangedSinceReady);
 
     // 4. Restore the version that was sent: a new layer, the file is back as it was sent.
     let restored = api.restore(&item, &v1).unwrap();
     assert_eq!(restored.seq, 3);
     assert_eq!(fs::read(&file).unwrap(), b"first draft");
-    assert_eq!(api.recent(5).unwrap()[0].status, StatusDto::Ready);
     assert_eq!(api.history(&item).unwrap().len(), 3, "nothing was lost");
 }

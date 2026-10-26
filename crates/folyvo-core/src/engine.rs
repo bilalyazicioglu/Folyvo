@@ -383,11 +383,11 @@ impl Engine {
         Ok(())
     }
 
-    pub fn export(&self, item: &ItemId, expected: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
+    pub fn export(&self, item: &ItemId, version: &VersionId, dest_dir: &Path) -> Result<ExportResult> {
         let mut g = self.lock();
         let inner = &mut *g;
         let result = Exporter::new(&mut inner.store, &inner.cas, self.clock.as_ref())
-            .export(item, expected, dest_dir)?;
+            .export(item, version, dest_dir)?;
         self.emit(EngineEvent::Exported { item: item.clone(), destination: result.destination.clone() });
         Ok(result)
     }
