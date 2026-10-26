@@ -16,3 +16,11 @@ test("the demo backend behaves like the real one for the main loop", () => {
   const after = h.history({ item: "itm_demo1" }) as { seq: number }[];
   expect(after[0].seq).toBe(latestBefore + 1);
 });
+
+test("the demo shows a copy that left and a picture for each kind it can draw", () => {
+  const h = demoHandlers();
+  const copies = h.copies({ item: "itm_demo1" }) as { versionId: string; service: string }[];
+  expect(copies).toEqual([expect.objectContaining({ versionId: "ver_08", service: "mail" })]);
+  expect((h.preview({ item: "itm_demo1", version: "ver_09" }) as { picture: string }).picture).toMatch(/^data:image\//);
+  expect((h.preview({ item: "itm_demo3", version: "ver_02" }) as { picture: null }).picture).toBeNull();
+});

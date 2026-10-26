@@ -4,7 +4,7 @@ import { copyLabel } from "../copies";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { fileKind } from "../files";
 import { useAction, useCopies, useHistory, useNow, usePreview, useRecent } from "../queries";
-import { folderName, sizeLabel } from "../strata";
+import { folderName, sizeLabel } from "../files";
 import { needsSeconds, whenLabel } from "../time";
 import { Stage } from "./Stage";
 import { TimeList } from "./TimeList";

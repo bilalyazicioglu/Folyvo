@@ -7,7 +7,7 @@ test("motion is switched off for people who asked the system for less of it", ()
   expect(block![0]).toContain("transition: none");
 });
 
-test("there is no keyframe animation now that the share-ready moment is gone", () => {
+test("nothing moves on its own: no keyframe animations", () => {
   const names = [...css.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]);
   expect(names).toEqual([]);
 });

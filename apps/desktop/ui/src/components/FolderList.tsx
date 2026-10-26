@@ -1,5 +1,5 @@
 import type { FolderDto } from "../generated/FolderDto";
-import { folderName } from "../strata";
+import { folderName } from "../files";
 
 interface Props {
   folders: FolderDto[];
