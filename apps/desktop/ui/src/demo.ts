@@ -10,6 +10,7 @@ export function demoHandlers() {
   const now = Date.now();
   const v = (seq: number, minutesAgo: number, size: number, extra: Partial<VersionDto> = {}): VersionDto => ({
     id: `ver_${seq.toString(16).padStart(2, "0")}`,
+    code: seq.toString(16).padStart(2, "0"),
     seq,
     createdAt: now - minutesAgo * MIN,
     size,
