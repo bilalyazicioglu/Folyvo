@@ -248,3 +248,12 @@ test("a row reads out its name and its day, and each dot its time", async () => 
   await waitFor(() => expect(within(open).getByRole("listitem", { name: "09:58, a copy left" })).toBeInTheDocument());
   expect(within(open).getByRole("listitem", { name: "10:12" })).toBeInTheDocument();
 });
+
+test("the keeping line opens the watched folders, which are not named twice", async () => {
+  backend();
+  renderWithClient(<Popover />);
+  const line = await screen.findByText("Keeping every save in Client work");
+  expect(line.closest("summary")).not.toBeNull();
+  expect(screen.queryByText(/Watched folders/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeInTheDocument();
+});

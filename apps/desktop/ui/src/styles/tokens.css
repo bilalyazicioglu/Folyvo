@@ -14,6 +14,9 @@
   --focus: #0a60ff;
   --ok: #30b34f;
   --radius: 10px;
+  /* How much of the page colour lies over the native glass, and the light caught by its edge. */
+  --glass-tint: 30%;
+  --glass-rim: rgb(255 255 255 / 0.6);
   --font: -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
 }
 
@@ -29,5 +32,11 @@
     --danger: #ff9a90;
     --focus: #6aa2ff;
     --accent-text: #5fd08f;
+    --glass-tint: 40%;
+    --glass-rim: rgb(255 255 255 / 0.18);
   }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root { --glass-tint: 100%; }
 }
