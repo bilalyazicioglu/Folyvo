@@ -10,12 +10,14 @@ use proptest::prelude::*;
 
 const FILES: usize = 2;
 const CONTENTS: [&[u8]; 4] = [b"", b"alpha", b"beta beta", b"gamma gamma gamma"];
+const SERVICES: [&str; 5] = ["mail", "airdrop", "messages", "copy", "other:Blip"];
 
 #[derive(Debug, Clone)]
 enum Op {
     Write { file: usize, content: usize },
     Ingest { file: usize },
-    Export { file: usize },
+    Copy { file: usize, nth: usize },
+    Hand { file: usize, nth: usize, service: usize },
     Restore { file: usize, nth: usize },
     Delete { file: usize },
 }
@@ -25,7 +27,12 @@ fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         (f.clone(), 0..CONTENTS.len()).prop_map(|(file, content)| Op::Write { file, content }),
         f.clone().prop_map(|file| Op::Ingest { file }),
-        f.clone().prop_map(|file| Op::Export { file }),
+        (f.clone(), 0usize..8).prop_map(|(file, nth)| Op::Copy { file, nth }),
+        (f.clone(), 0usize..8, 0..SERVICES.len()).prop_map(|(file, nth, service)| Op::Hand {
+            file,
+            nth,
+            service
+        }),
         (f.clone(), 0usize..8).prop_map(|(file, nth)| Op::Restore { file, nth }),
         f.prop_map(|file| Op::Delete { file }),
     ]
@@ -42,7 +49,8 @@ struct World {
     item: [Option<ItemId>; FILES],
     exists: [bool; FILES],
     seen: HashMap<ItemId, HashSet<VersionId>>,
-    materialised: Vec<(PathBuf, ContentHash)>,
+    /// Every materialised file with the version it holds.
+    materialised: Vec<(PathBuf, ContentHash, VersionId)>,
 }
 
 impl World {
@@ -78,6 +86,10 @@ impl World {
             .content_hash
     }
 
+    fn version_counts(&self) -> Vec<usize> {
+        self.item.iter().flatten().map(|i| self.engine.history(i).unwrap().len()).collect()
+    }
+
     fn apply(&mut self, op: &Op) {
         self.clock.advance(1_000);
         match *op {
@@ -94,17 +106,33 @@ impl World {
                 self.exists[file] = false;
                 self.engine.mark_missing(&self.path(file)).unwrap();
             }
-            Op::Export { file } => {
+            Op::Copy { file, nth } => {
                 let Some(item) = self.item[file].clone() else { return };
-                let latest = self.engine.history(&item).unwrap()[0].id.clone();
-                let r = self.engine.export(&item, &latest, &self.dir.path().join("out")).unwrap();
-                let latest_hash = self.hash_of(&item, &latest);
+                let history = self.engine.history(&item).unwrap();
+                let chosen = history[nth % history.len()].id.clone();
+                let r = self.engine.export(&item, &chosen, &self.dir.path().join("out")).unwrap();
+                let chosen_hash = self.hash_of(&item, &chosen);
                 assert_eq!(
                     hash_file(&r.destination),
-                    latest_hash,
+                    chosen_hash,
                     "a copy carries the chosen version's bytes"
                 );
-                self.materialised.push((r.materialized, latest_hash));
+                self.materialised.push((r.materialized, chosen_hash, chosen));
+            }
+            Op::Hand { file, nth, service } => {
+                let Some(item) = self.item[file].clone() else { return };
+                let history = self.engine.history(&item).unwrap();
+                let chosen = history[nth % history.len()].id.clone();
+                let counts_before = self.version_counts();
+                let path = self.engine.materialise(&item, &chosen).unwrap();
+                self.engine.record_handed(&item, &chosen, SERVICES[service]).unwrap();
+                assert_eq!(
+                    self.version_counts(),
+                    counts_before,
+                    "handing a copy out never changes any history"
+                );
+                let chosen_hash = self.hash_of(&item, &chosen);
+                self.materialised.push((path, chosen_hash, chosen));
             }
             Op::Restore { file, nth } => {
                 let Some(item) = self.item[file].clone() else { return };
@@ -148,8 +176,13 @@ impl World {
                 assert_eq!(hash_file(&object), v.content_hash, "stored bytes always match the recorded hash");
             }
         }
-        for (path, hash) in &self.materialised {
-            assert_eq!(&hash_file(path), hash, "a materialised export never changes: {path:?}");
+        for (path, hash, version) in &self.materialised {
+            assert_eq!(&hash_file(path), hash, "a materialised copy never changes: {path:?}");
+            let found = self.engine.which_one(path).unwrap();
+            assert!(
+                found.iter().any(|m| &m.version.id == version),
+                "which-one recognises every copy: {path:?}"
+            );
         }
     }
 }
