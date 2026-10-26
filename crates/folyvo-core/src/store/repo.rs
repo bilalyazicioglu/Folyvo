@@ -139,16 +139,24 @@ pub(crate) fn display_name(c: &Connection, item: &ItemId) -> Result<Option<Strin
 
 pub(crate) fn insert_event(c: &Connection, e: &ShareEvent, target_key: Option<&str>) -> Result<()> {
     c.execute(
-        "INSERT INTO share_events(item_id, version_id, kind, target_path, target_key, at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![e.item_id.as_str(), e.version_id.as_str(), e.kind.as_str(), e.target_path, target_key, e.at],
+        "INSERT INTO share_events(item_id, version_id, kind, service, target_path, target_key, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            e.item_id.as_str(),
+            e.version_id.as_str(),
+            e.kind.as_str(),
+            e.service,
+            e.target_path,
+            target_key,
+            e.at
+        ],
     )?;
     Ok(())
 }
 
 pub(crate) fn events_for_item(c: &Connection, item: &ItemId) -> Result<Vec<ShareEvent>> {
     let mut stmt = c.prepare(
-        "SELECT item_id, version_id, kind, target_path, at FROM share_events WHERE item_id = ?1 ORDER BY id ASC",
+        "SELECT item_id, version_id, kind, service, target_path, at FROM share_events WHERE item_id = ?1 ORDER BY id ASC",
     )?;
     let rows = stmt.query_map([item.as_str()], |r| {
         let item_id: String = r.get(0)?;
@@ -158,8 +166,9 @@ pub(crate) fn events_for_item(c: &Connection, item: &ItemId) -> Result<Vec<Share
             item_id: ItemId::parse(&item_id).map_err(|e| conv(0, e))?,
             version_id: VersionId::parse(&version_id).map_err(|e| conv(1, e))?,
             kind: ShareEventKind::parse(&kind).ok_or_else(|| conv(2, "unknown event kind"))?,
-            target_path: r.get(3)?,
-            at: r.get(4)?,
+            service: r.get(3)?,
+            target_path: r.get(4)?,
+            at: r.get(5)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

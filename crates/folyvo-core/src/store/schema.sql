@@ -36,23 +36,20 @@ CREATE TABLE versions (
     UNIQUE (id, item_id)
 );
 
-CREATE TABLE share_ready (
-    item_id    TEXT PRIMARY KEY REFERENCES items(id),
-    version_id TEXT    NOT NULL,
-    marked_at  INTEGER NOT NULL,
-    FOREIGN KEY (version_id, item_id) REFERENCES versions(id, item_id)
-);
-
 CREATE TABLE share_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id     TEXT    NOT NULL REFERENCES items(id),
     version_id  TEXT    NOT NULL,
-    kind        TEXT    NOT NULL CHECK (kind IN ('marked', 'exported')),
+    kind        TEXT    NOT NULL CHECK (kind IN ('exported', 'handed')),
+    service     TEXT,
     target_path TEXT,
     target_key  TEXT,
     at          INTEGER NOT NULL,
+    CHECK ((kind = 'handed') = (service IS NOT NULL)),
     FOREIGN KEY (version_id, item_id) REFERENCES versions(id, item_id)
 );
+
+CREATE INDEX versions_by_hash ON versions(content_hash);
 
 CREATE TABLE watched_roots (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
