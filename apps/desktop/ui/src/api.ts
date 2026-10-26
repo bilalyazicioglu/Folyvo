@@ -56,6 +56,8 @@ export const api = {
   removeFolder: (path: string) => call<void>("remove_folder", { path }),
   openHistory: (item: string) => call<void>("open_history", { item }),
   hidePopover: () => call<void>("hide_popover"),
+  /** The popover window follows the height of its content. */
+  fitPopover: (height: number) => call<void>("fit_popover", { height }),
   reveal: (path: string) => call<void>("reveal", { path }),
   /** Native folder picker. Resolves to null when the person cancels. */
   chooseFolder: async (title: string): Promise<string | null> => {

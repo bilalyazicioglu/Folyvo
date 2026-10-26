@@ -116,7 +116,16 @@ pub async fn remove_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
 #[tauri::command]
 pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
     folyvo_core::model::ItemId::parse(&item).map_err(UserError::from)?;
-    crate::tray::open_panel(&app, &item).map_err(|_| UserError::internal())
+    crate::tray::open_versions(&app, &item).map_err(|_| UserError::internal())
+}
+
+/// The popover asks for the height of its content; the window follows within limits.
+#[tauri::command]
+pub fn fit_popover(app: AppHandle, height: f64) {
+    if let Some(w) = app.get_webview_window("popover") {
+        let size = tauri::LogicalSize::new(crate::fit::POPOVER_WIDTH, crate::fit::popover_height(height));
+        let _ = w.set_size(size);
+    }
 }
 
 /// The UI tells the shell while a native dialog is open, so losing focus does not hide the popover.

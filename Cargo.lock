@@ -956,6 +956,7 @@ dependencies = [
  "tauri-plugin-positioner",
  "tempfile",
  "ts-rs",
+ "window-vibrancy",
 ]
 
 [[package]]

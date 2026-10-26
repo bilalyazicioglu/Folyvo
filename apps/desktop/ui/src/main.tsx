@@ -15,7 +15,7 @@ async function start() {
   void startEventBridge(client);
   createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={client}>
-      {params.get("view") === "panel" ? <Panel itemId={params.get("item") ?? ""} /> : <Popover />}
+      {params.get("view") === "versions" ? <Panel itemId={params.get("item") ?? ""} /> : <Popover />}
     </QueryClientProvider>,
   );
 }

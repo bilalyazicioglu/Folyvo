@@ -3,6 +3,7 @@ pub mod api;
 pub mod commands;
 pub mod dto;
 pub mod errors;
+pub mod fit;
 pub mod preview;
 pub mod runtime;
 pub mod toggle;
@@ -45,6 +46,7 @@ pub fn run() {
             commands::remove_folder,
             commands::open_history,
             commands::hide_popover,
+            commands::fit_popover,
             commands::set_dialog_open,
             commands::reveal,
         ])
