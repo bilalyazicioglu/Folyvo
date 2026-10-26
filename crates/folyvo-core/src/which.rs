@@ -50,7 +50,6 @@ pub(crate) fn matches_for_hash(store: &Store, hash: &ContentHash) -> Result<Vec<
 }
 
 /// Hash the file at `path` and look it up. Directories are `NotAFile`; a missing path is an I/O error.
-#[allow(dead_code)] // used by the Vault (CLI) in the next task
 pub(crate) fn which_one(store: &Store, path: &Path) -> Result<Vec<Match>> {
     let hash = hash_of_file(path)?;
     matches_for_hash(store, &hash)

@@ -62,7 +62,13 @@ impl From<CoreError> for UserError {
                 "Folyvo can't find this file",
                 "It may have been removed from a watched folder.",
             ),
-            CoreError::VersionMissing(_) | CoreError::NoSuchVersionNumber(_) => Self::new(
+            CoreError::AmbiguousVersion(_) => Self::bad_request(
+                "More than one version matches",
+                "Pick the version from the history instead.",
+            ),
+            CoreError::VersionMissing(_)
+            | CoreError::NoSuchVersionNumber(_)
+            | CoreError::NoSuchVersion(_) => Self::new(
                 "version_missing",
                 "That version no longer exists",
                 "Open the history again to see the versions that are saved.",
@@ -137,6 +143,8 @@ mod tests {
         assert_eq!(code(CoreError::RootOverlapsVault(PathBuf::from("/v"))), "folder_not_allowed");
         assert_eq!(code(CoreError::Watch("x".into())), "cannot_watch");
         assert_eq!(code(CoreError::BadService("sent".into())), "bad_request");
+        assert_eq!(code(CoreError::NoSuchVersion("ffff".into())), "version_missing");
+        assert_eq!(code(CoreError::AmbiguousVersion("abcd".into())), "bad_request");
         assert_eq!(code(CoreError::PathTaken(PathBuf::from("/a"))), "internal");
     }
 

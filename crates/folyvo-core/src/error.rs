@@ -27,6 +27,10 @@ pub enum CoreError {
     BadService(String),
     #[error("this file has no version v{0}")]
     NoSuchVersionNumber(i64),
+    #[error("\"{0}\" is not a version of this file")]
+    NoSuchVersion(String),
+    #[error("\"{0}\" matches more than one version; use more characters of the code")]
+    AmbiguousVersion(String),
     #[error("version {0} not found")]
     VersionMissing(VersionId),
     #[error("stored object {0} is missing from the vault")]

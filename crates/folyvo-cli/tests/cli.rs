@@ -9,7 +9,7 @@ fn folyvo(vault: &std::path::Path, args: &[&str]) -> (bool, String) {
 }
 
 #[test]
-fn save_then_log_shows_layers_newest_first() {
+fn save_then_log_lists_versions_newest_first_with_codes() {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault");
     let f = dir.path().join("Proposal.docx");
@@ -25,10 +25,100 @@ fn save_then_log_shows_layers_newest_first() {
 
     let (ok, text) = folyvo(&vault, &["log", f.to_str().unwrap()]);
     assert!(ok, "{text}");
-    let v2 = text.find("v2").unwrap();
-    let v1 = text.find("v1").unwrap();
-    assert!(v2 < v1, "newest layer must come first:\n{text}");
-    assert!(text.contains("Proposal.docx  2 versions"), "{text}");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "Proposal.docx  2 versions", "{text}");
+    assert_eq!(lines.len(), 3, "{text}");
+    let newest = code_of(lines[1]);
+    let first = code_of(lines[2]);
+    assert!(lines[2].ends_with("First version"), "the oldest comes last:\n{text}");
+    assert_ne!(newest, first);
+    assert!(!text.contains("v1") && !text.contains('█'), "{text}");
+}
+
+/// The second field of a log line is the version code: 8 lowercase hex characters.
+fn code_of(line: &str) -> String {
+    let code = line.split("  ").nth(1).unwrap_or_default();
+    assert!(
+        code.len() == 8 && code.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+        "{line:?}"
+    );
+    code.to_string()
+}
+
+fn two_drafts(dir: &std::path::Path, vault: &std::path::Path) -> std::path::PathBuf {
+    let f = dir.join("Proposal.docx");
+    fs::write(&f, b"sent to the client").unwrap();
+    folyvo(vault, &["save", f.to_str().unwrap()]);
+    fs::write(&f, b"edited afterwards").unwrap();
+    folyvo(vault, &["save", f.to_str().unwrap()]);
+    f
+}
+
+#[test]
+fn copy_without_a_version_copies_the_newest() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    let f = two_drafts(dir.path(), &vault);
+    let out = dir.path().join("out");
+    fs::create_dir(&out).unwrap();
+    let (ok, text) = folyvo(&vault, &["copy", f.to_str().unwrap(), out.to_str().unwrap()]);
+    assert!(ok && text.starts_with("Saved a copy of "), "{text}");
+    assert_eq!(fs::read(out.join("Proposal.docx")).unwrap(), b"edited afterwards");
+}
+
+#[test]
+fn copy_takes_a_code_or_a_v_number() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    let f = two_drafts(dir.path(), &vault);
+    let p = f.to_str().unwrap();
+    let (_, log) = folyvo(&vault, &["log", p]);
+    let first = code_of(log.lines().nth(2).unwrap());
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    fs::create_dir(&a).unwrap();
+    fs::create_dir(&b).unwrap();
+    let (ok, text) = folyvo(&vault, &["copy", p, a.to_str().unwrap(), &first[..5]]);
+    assert!(ok, "{text}");
+    assert_eq!(fs::read(a.join("Proposal.docx")).unwrap(), b"sent to the client");
+    let (ok, text) = folyvo(&vault, &["copy", p, b.to_str().unwrap(), "v1"]);
+    assert!(ok, "{text}");
+    assert_eq!(fs::read(b.join("Proposal.docx")).unwrap(), b"sent to the client");
+    let (_, log) = folyvo(&vault, &["log", p]);
+    assert!(log.contains("  Copy saved to "), "{log}");
+}
+
+#[test]
+fn which_names_the_saved_time_and_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    let f = two_drafts(dir.path(), &vault);
+    let (_, log) = folyvo(&vault, &["log", f.to_str().unwrap()]);
+    let first = code_of(log.lines().nth(2).unwrap());
+    let back = dir.path().join("from-the-client.docx");
+    fs::write(&back, b"sent to the client").unwrap();
+    let (ok, text) = folyvo(&vault, &["which", back.to_str().unwrap()]);
+    assert!(ok, "{text}");
+    assert!(
+        text.starts_with("Proposal.docx, ") && text.trim_end().ends_with(&format!("({first})")),
+        "{text}"
+    );
+
+    fs::write(&back, b"sent to the client, then edited").unwrap();
+    let (ok, text) = folyvo(&vault, &["which", back.to_str().unwrap()]);
+    assert!(ok, "{text}");
+    assert_eq!(
+        text.trim_end(),
+        "No saved version has exactly this content. It may have been opened and saved again since it left."
+    );
+}
+
+#[test]
+fn export_is_now_called_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    let f = two_drafts(dir.path(), &vault);
+    let (ok, text) = folyvo(&vault, &["export", f.to_str().unwrap(), dir.path().to_str().unwrap()]);
+    assert!(!ok && text.contains("usage:") && text.contains("copy <file> <folder> [version]"), "{text}");
 }
 
 #[test]
@@ -53,7 +143,7 @@ fn log_of_an_unknown_file_fails_with_a_plain_message() {
 }
 
 #[test]
-fn export_and_restore_work_end_to_end() {
+fn copy_and_restore_work_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault");
     let out = dir.path().join("out");
@@ -69,8 +159,8 @@ fn export_and_restore_work_end_to_end() {
     let (_, log) = folyvo(&vault, &["log", p]);
     assert!(!log.contains("ready"), "{log}");
 
-    let (ok, text) = folyvo(&vault, &["export", p, out.to_str().unwrap()]);
-    assert!(ok && text.contains("Exported v2 to"), "{text}");
+    let (ok, text) = folyvo(&vault, &["copy", p, out.to_str().unwrap()]);
+    assert!(ok && text.contains("Saved a copy of"), "{text}");
     assert_eq!(fs::read(out.join("Proposal.docx")).unwrap(), b"edited afterwards");
 
     let (ok, text) = folyvo(&vault, &["restore", p, "v1"]);
@@ -90,7 +180,7 @@ fn unknown_versions_give_plain_messages() {
     let (ok, text) = folyvo(&vault, &["restore", p, "v9"]);
     assert!(!ok && text.contains("no version v9"), "{text}");
     let (ok, text) = folyvo(&vault, &["restore", p, "latest"]);
-    assert!(!ok && text.contains("version like v2"), "{text}");
+    assert!(!ok && text.contains("\"latest\" is not a version of this file"), "{text}");
 }
 
 #[test]
