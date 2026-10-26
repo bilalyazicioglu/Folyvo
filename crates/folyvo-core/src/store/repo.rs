@@ -163,22 +163,51 @@ pub(crate) fn insert_event(c: &Connection, e: &ShareEvent, target_key: Option<&s
     Ok(())
 }
 
+const EVENT_COLS: &str = "item_id, version_id, kind, service, target_path, at";
+
+fn row_to_event(r: &Row<'_>) -> rusqlite::Result<ShareEvent> {
+    let item_id: String = r.get(0)?;
+    let version_id: String = r.get(1)?;
+    let kind: String = r.get(2)?;
+    Ok(ShareEvent {
+        item_id: ItemId::parse(&item_id).map_err(|e| conv(0, e))?,
+        version_id: VersionId::parse(&version_id).map_err(|e| conv(1, e))?,
+        kind: ShareEventKind::parse(&kind).ok_or_else(|| conv(2, "unknown event kind"))?,
+        service: r.get(3)?,
+        target_path: r.get(4)?,
+        at: r.get(5)?,
+    })
+}
+
 pub(crate) fn events_for_item(c: &Connection, item: &ItemId) -> Result<Vec<ShareEvent>> {
+    let mut stmt =
+        c.prepare(&format!("SELECT {EVENT_COLS} FROM share_events WHERE item_id = ?1 ORDER BY id ASC"))?;
+    let rows = stmt.query_map([item.as_str()], row_to_event)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Copies saved or handed out with `from <= at < to`, oldest first.
+pub(crate) fn events_between(c: &Connection, from: i64, to: i64) -> Result<Vec<ShareEvent>> {
+    let mut stmt = c.prepare(&format!(
+        "SELECT {EVENT_COLS} FROM share_events WHERE at >= ?1 AND at < ?2 ORDER BY at ASC, id ASC"
+    ))?;
+    let rows = stmt.query_map([from, to], row_to_event)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// (item, version, created_at) of every version saved with `from <= created_at < to`, oldest first.
+pub(crate) fn saves_between(c: &Connection, from: i64, to: i64) -> Result<Vec<(ItemId, VersionId, i64)>> {
     let mut stmt = c.prepare(
-        "SELECT item_id, version_id, kind, service, target_path, at FROM share_events WHERE item_id = ?1 ORDER BY id ASC",
+        "SELECT item_id, id, created_at FROM versions WHERE created_at >= ?1 AND created_at < ?2 ORDER BY created_at ASC, seq ASC",
     )?;
-    let rows = stmt.query_map([item.as_str()], |r| {
-        let item_id: String = r.get(0)?;
-        let version_id: String = r.get(1)?;
-        let kind: String = r.get(2)?;
-        Ok(ShareEvent {
-            item_id: ItemId::parse(&item_id).map_err(|e| conv(0, e))?,
-            version_id: VersionId::parse(&version_id).map_err(|e| conv(1, e))?,
-            kind: ShareEventKind::parse(&kind).ok_or_else(|| conv(2, "unknown event kind"))?,
-            service: r.get(3)?,
-            target_path: r.get(4)?,
-            at: r.get(5)?,
-        })
+    let rows = stmt.query_map([from, to], |r| {
+        let item: String = r.get(0)?;
+        let id: String = r.get(1)?;
+        Ok((
+            ItemId::parse(&item).map_err(|e| conv(0, e))?,
+            VersionId::parse(&id).map_err(|e| conv(1, e))?,
+            r.get(2)?,
+        ))
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
