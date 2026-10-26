@@ -57,8 +57,8 @@ Walk through this on a real Mac whenever the window code changes:
 4. Save a text file in that folder. Within about five seconds a card with one layer appears.
 5. Change and save it twice. Layers stack with the newest on top and the card offers "Export v3".
 6. Click "All versions" and press "Export v1" on the oldest row. Choose a folder. The notice says "Exported v1". "Show in Finder" reveals a copy that opens normally and can be edited.
-7. In Terminal, run `folyvo which <that copy>`. It names the file, the time of v1 and its version code.
-8. Add a line to the copy, save it and run `folyvo which` again. It says no saved version has exactly this content.
+7. In another Terminal at the repository root, run `FOLYVO_VAULT=/tmp/folyvo-dev cargo run -q -p folyvo-cli -- which <that copy>` (the same vault the app uses). It names the file, the time of v1 and its version code. The app and the command line may have the vault open at the same time.
+8. Add a line to the copy, save it and run the same command again. It says no saved version has exactly this content.
 9. In the panel, restore v1 and confirm. The file on disk has the old content and a new layer called "Restored" is on top.
 10. Click the menu bar icon while the popover is open: it closes and does not reopen. Press Escape: it closes.
 11. Quit and start the app again. The folder is still watched, and a file saved while the app was closed appears as a new version.
