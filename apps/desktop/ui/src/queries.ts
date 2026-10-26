@@ -10,6 +10,9 @@ export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: api.stats
 export const useFolders = () => useQuery({ queryKey: ["folders"], queryFn: api.folders });
 export const useActivity = (from: number, to: number) =>
   useQuery({ queryKey: ["activity", from, to], queryFn: () => api.activity(from, to) });
+/** A version's picture never changes, so it is drawn once per window. */
+export const usePreview = (item: string, version?: string) =>
+  useQuery({ queryKey: ["preview", item, version], queryFn: () => api.preview(item, version!), enabled: !!version, staleTime: Infinity });
 export const useCopies = (item?: string) =>
   useQuery({ queryKey: ["copies", item], queryFn: () => api.copies(item!), enabled: !!item });
 

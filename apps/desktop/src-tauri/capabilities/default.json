@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the popover and the history panel may do",
-  "windows": ["popover", "panel"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "description": "What the popover and the versions window may do",
+  "windows": ["popover", "versions"],
+  "permissions": ["core:default", "core:window:allow-close", "core:window:allow-set-title", "dialog:allow-open"]
 }

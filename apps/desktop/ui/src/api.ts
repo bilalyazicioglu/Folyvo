@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ActivityDto } from "./generated/ActivityDto";
 import type { CopyDto } from "./generated/CopyDto";
@@ -70,6 +71,8 @@ export const api = {
       else if (payload.type === "leave") cb({ type: "leave" });
       else cb({ type: "over" });
     }),
+  closeWindow: () => getCurrentWindow().close(),
+  setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
   /** Native folder picker. Resolves to null when the person cancels. */
   chooseFolder: async (title: string): Promise<string | null> => {
     // The picker takes focus from the popover, which would hide it and the picker with it.
