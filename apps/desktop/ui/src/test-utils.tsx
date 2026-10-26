@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import type { FolderDto } from "./generated/FolderDto";
@@ -76,6 +76,7 @@ export function mockBackend(over: Partial<Backend> = {}) {
     },
     { shouldMockEvents: true },
   );
+  mockWindows("popover");
   return { state, calls, called: (cmd: string) => calls.filter((c) => c.cmd === cmd) };
 }
 

@@ -3,7 +3,8 @@ import { folderName } from "../strata";
 
 interface Props {
   folders: FolderDto[];
-  onAdd: () => void;
+  /** Without it the list has no add button of its own. */
+  onAdd?: () => void;
   onRemove: (path: string) => void;
   busy: boolean;
   defaultOpen?: boolean;
@@ -31,9 +32,11 @@ export function FolderList({ folders, onAdd, onRemove, busy, defaultOpen }: Prop
           </li>
         ))}
       </ul>
-      <button type="button" className="btn" onClick={onAdd} disabled={busy}>
-        Add folder
-      </button>
+      {onAdd && (
+        <button type="button" className="btn" onClick={onAdd} disabled={busy}>
+          Add folder
+        </button>
+      )}
     </details>
   );
 }
