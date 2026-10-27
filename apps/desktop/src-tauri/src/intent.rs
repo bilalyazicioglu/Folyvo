@@ -56,8 +56,14 @@ pub fn parse_url(url: &str) -> Option<Intent> {
             _ => {}
         }
     }
-    let path = path.filter(|p| p.is_absolute())?;
+    let path = path.filter(|p| p.is_absolute() && !elsewhere(p))?;
     Some(Intent { kind: kind?, path })
+}
+
+/// A network share or another disk. Decided from the path alone: looking at such a path, even to ask
+/// whether it exists, can make macOS connect to the server a link names.
+fn elsewhere(path: &std::path::Path) -> bool {
+    ["/net", "/Network", "/Volumes"].iter().any(|root| path.starts_with(root))
 }
 
 /// Percent-decoding as UTF-8. `+` stays a plus: Finder encodes spaces as `%20`.
@@ -153,6 +159,20 @@ mod tests {
         ] {
             assert_eq!(parse_url(url), None, "{url}");
         }
+    }
+
+    #[test]
+    fn a_url_never_reaches_a_network_share_or_another_disk() {
+        // Any web page can open these; touching /net or a share would make macOS connect to it.
+        for path in [
+            "%2Fnet%2Fhost%2Fshare%2Fx.docx",
+            "%2FNetwork%2FServers%2Fx",
+            "%2FVolumes%2FUSB%2Fx.docx",
+            "%2Fnet",
+        ] {
+            assert_eq!(parse_url(&format!("folyvo://intent?kind=which_one&path={path}")), None, "{path}");
+        }
+        assert!(parse_url("folyvo://intent?kind=which_one&path=%2FUsers%2Fa%2Fnetwork%2Fx.docx").is_some());
     }
 
     #[test]
