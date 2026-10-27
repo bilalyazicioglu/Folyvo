@@ -75,6 +75,24 @@ pub fn from_link_allowed(path: &std::path::Path, home: &std::path::Path) -> bool
     path.strip_prefix(home.trim_end_matches('/')).is_some_and(|rest| rest.len() > 1 && rest.starts_with('/'))
 }
 
+/// Whether a Services request may name `path`. The person picked the file, so any local file is fine,
+/// another disk included; only another app can fill the pasteboard, so a network share is still
+/// refused, decided from the text alone like a link.
+pub fn from_service_allowed(path: &std::path::Path) -> bool {
+    use std::path::Component;
+    let mut parts = path.components();
+    if parts.next() != Some(Component::RootDir) || !parts.clone().all(|c| matches!(c, Component::Normal(_))) {
+        return false;
+    }
+    match parts.next() {
+        Some(Component::Normal(first)) => {
+            let first = first.to_string_lossy().to_lowercase();
+            first != "net" && first != "network"
+        }
+        _ => false,
+    }
+}
+
 /// Percent-decoding as UTF-8. `+` stays a plus: Finder encodes spaces as `%20`.
 fn decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
@@ -188,6 +206,18 @@ mod tests {
             "/Users/a", // home itself is not a file
         ] {
             assert!(!from_link_allowed(Path::new(no), home), "{no}");
+        }
+    }
+
+    #[test]
+    fn services_take_any_local_file_but_not_a_network_share() {
+        for ok in ["/Users/a/Desktop/x.docx", "/Volumes/USB/Teklif.docx", "/tmp/x"] {
+            assert!(from_service_allowed(Path::new(ok)), "{ok}");
+        }
+        for no in
+            ["/net/host/x", "/NET/host/x", "/Network/Servers/x", "/Users/a/../../net/h/x", "relative/x", "/"]
+        {
+            assert!(!from_service_allowed(Path::new(no)), "{no}");
         }
     }
 
