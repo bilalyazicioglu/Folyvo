@@ -1,4 +1,4 @@
-// Folyvo's items in Finder's right-click menu. Stateless: it watches every folder, shows a fixed menu,
+// Folyvo's items in Finder's right-click menu. Stateless: it watches the home folder, shows a fixed menu,
 // and asks the app to open a window with a folyvo:// URL. It never changes anything itself.
 import Cocoa
 import FinderSync
@@ -12,11 +12,19 @@ let items: [(title: String, kind: String)] = [
     ("Which One Is This?…", "which_one"),
 ]
 
+/// The person's home folder. Inside the sandbox, FileManager answers with the extension's own container.
+func realHome() -> String {
+    if let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir { return String(cString: dir) }
+    return NSHomeDirectory()
+}
+
 @objc(FinderSync)
 final class FinderSync: FIFinderSync {
     override init() {
         super.init()
-        FIFinderSyncController.default().directoryURLs = [URL(fileURLWithPath: "/")]
+        // Only the home folder: the app follows a link only for a file there, so items shown
+        // anywhere else would do nothing. Services cover other disks.
+        FIFinderSyncController.default().directoryURLs = [URL(fileURLWithPath: realHome(), isDirectory: true)]
     }
 
     override func menu(for kind: FIMenuKind) -> NSMenu {

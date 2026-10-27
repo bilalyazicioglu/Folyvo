@@ -54,7 +54,7 @@ CI fails when the generated files in `apps/desktop/ui/src/generated` differ from
 
 Folyvo's four actions (Browse All Versions…, Send a Copy…, Save a Copy…, Which One Is This?…) reach Finder two ways:
 
-- **Finder's right-click menu**, from a Finder Sync extension inside the app (`Contents/PlugIns/FolyvoFinderSync.appex`). `cargo tauri build` builds it through `apps/desktop/finder/build.sh` (Swift, no Xcode project, no Apple account) and signs it ad hoc. The app turns it on when it starts. macOS does not run Finder extensions in iCloud Drive folders.
+- **Finder's right-click menu**, from a Finder Sync extension inside the app (`Contents/PlugIns/FolyvoFinderSync.appex`). `cargo tauri build` builds it through `apps/desktop/finder/build.sh` (Swift, no Xcode project, no Apple account) and signs it ad hoc. The app turns it on the first time it starts and leaves it alone after that, so a person who turns it off in System Settings keeps it off. Its items appear for files in the home folder. macOS does not run Finder extensions in iCloud Drive folders.
 - **Right-click › Services › Folyvo: …**, declared in `src-tauri/Info.plist`. This works in every folder, iCloud Drive included, and needs no setting.
 
 Both ask the app with a request that only ever opens a window: the file's versions window, or the popover's "which one is this?" answer for a file Folyvo did not save. Finder's items send a `folyvo://intent?kind=…&path=…` link. Any app or web page can open such a link, so Folyvo acts on one only for a file inside the home folder, checked from the path alone before it looks at the disk.

@@ -33,17 +33,35 @@ pub fn runs_from_bundle(exe: &Path) -> bool {
     exe.ancestors().any(|p| p.extension().is_some_and(|e| e == "app"))
 }
 
-/// Turns on the Finder extension that ships inside Folyvo.app, so its items appear without a visit to
-/// System Settings. macOS keeps the person's choice if they turn it off there later.
+/// The Finder extension's id, as `pluginkit` and the bundle know it.
+const FINDER_EXTENSION: &str = "dev.folyvo.app.findersync";
+
+/// Whether nobody has chosen yet to turn the Finder extension on or off. `pluginkit -m` starts the
+/// extension's line with `+` (on) or `-` (turned off, usually by the person in System Settings).
+pub fn needs_election(listing: &str) -> bool {
+    match listing.lines().find(|l| l.contains(FINDER_EXTENSION)) {
+        Some(line) => !line.starts_with(['+', '-']),
+        None => true,
+    }
+}
+
+/// Turns on the Finder extension that ships inside Folyvo.app the first time, so its items appear
+/// without a visit to System Settings. A choice already made, on or off, is left alone.
 #[cfg(target_os = "macos")]
 fn enable_finder_extension() {
-    if std::env::current_exe().is_ok_and(|exe| runs_from_bundle(&exe)) {
-        std::thread::spawn(|| {
-            let _ = std::process::Command::new("/usr/bin/pluginkit")
-                .args(["-e", "use", "-i", "dev.folyvo.app.findersync"])
-                .status();
-        });
+    use std::process::Command;
+    if !std::env::current_exe().is_ok_and(|exe| runs_from_bundle(&exe)) {
+        return;
     }
+    std::thread::spawn(|| {
+        let Ok(listed) = Command::new("/usr/bin/pluginkit").args(["-m", "-i", FINDER_EXTENSION]).output()
+        else {
+            return;
+        };
+        if needs_election(&String::from_utf8_lossy(&listed.stdout)) {
+            let _ = Command::new("/usr/bin/pluginkit").args(["-e", "use", "-i", FINDER_EXTENSION]).status();
+        }
+    });
 }
 
 pub fn run() {
@@ -159,6 +177,14 @@ mod tests {
             "/Applications/Folyvo.app/Contents/MacOS/folyvo-desktop"
         )));
         assert!(!runs_from_bundle(std::path::Path::new("/Users/a/folyvo/target/debug/folyvo-desktop")));
+    }
+
+    #[test]
+    fn the_finder_extension_is_turned_on_only_when_nobody_chose_yet() {
+        assert!(needs_election(""), "not registered yet");
+        assert!(needs_election("     dev.folyvo.app.findersync(0.1.0)\n"), "registered, no choice");
+        assert!(!needs_election("+    dev.folyvo.app.findersync(0.1.0)\n"), "already on");
+        assert!(!needs_election("-    dev.folyvo.app.findersync(0.1.0)\n"), "the person turned it off");
     }
 
     #[test]
