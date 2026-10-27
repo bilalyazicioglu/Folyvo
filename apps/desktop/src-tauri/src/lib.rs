@@ -7,6 +7,8 @@ pub mod fit;
 pub mod intent;
 pub mod preview;
 pub mod runtime;
+#[cfg(target_os = "macos")]
+pub mod services;
 pub mod share;
 pub mod toggle;
 pub mod tray;
@@ -74,6 +76,8 @@ pub fn run() {
             .map_err(|e| e.to_string())?;
             app.manage(runtime);
             tray::build(app)?;
+            #[cfg(target_os = "macos")]
+            services::register(app.handle());
             // A Finder or Services request that launched Folyvo is answered once the engine is up.
             if let Some(intent) = app.state::<intent::PendingIntent>().0.lock().unwrap().take() {
                 intent::act_on(app.handle(), intent);
@@ -106,6 +110,26 @@ mod tests {
         let plist = include_str!("../Info.plist");
         let schemes = plist.split("<key>CFBundleURLSchemes</key>").nth(1).expect("a URL scheme is declared");
         assert!(schemes.trim_start().starts_with("<array><string>folyvo</string></array>"), "{plist}");
+    }
+
+    #[test]
+    fn the_app_offers_four_services_named_for_folyvo() {
+        let plist = include_str!("../Info.plist");
+        let services = plist.split("<key>NSServices</key>").nth(1).expect("Services are declared");
+        let entries: Vec<&str> = services.split("<key>NSMenuItem</key>").skip(1).collect();
+        let titles = ["Browse All Versions…", "Send a Copy…", "Save a Copy…", "Which One Is This?…"];
+        assert_eq!(entries.len(), titles.len());
+        for (entry, title) in entries.iter().zip(titles) {
+            assert!(entry.contains(&format!("<string>Folyvo: {title}</string>")), "{entry}");
+            let message =
+                entry.split("<key>NSMessage</key><string>").nth(1).unwrap().split('<').next().unwrap();
+            assert!(intent::IntentKind::from_service_message(message).is_some(), "{message}");
+            assert!(entry.contains("<key>NSPortName</key><string>Folyvo</string>"), "{entry}");
+            assert!(
+                entry.contains("<key>NSSendFileTypes</key><array><string>public.item</string></array>"),
+                "{entry}"
+            );
+        }
     }
 
     #[test]

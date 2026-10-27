@@ -9,5 +9,37 @@
       <key>CFBundleURLSchemes</key><array><string>folyvo</string></array>
     </dict>
   </array>
+  <!-- The same four actions under right-click › Services, which also reaches iCloud Drive folders. -->
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Folyvo: Browse All Versions…</string></dict>
+      <key>NSMessage</key><string>browse</string>
+      <key>NSPortName</key><string>Folyvo</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Folyvo: Send a Copy…</string></dict>
+      <key>NSMessage</key><string>send</string>
+      <key>NSPortName</key><string>Folyvo</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Folyvo: Save a Copy…</string></dict>
+      <key>NSMessage</key><string>saveCopy</string>
+      <key>NSPortName</key><string>Folyvo</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Folyvo: Which One Is This?…</string></dict>
+      <key>NSMessage</key><string>whichOne</string>
+      <key>NSPortName</key><string>Folyvo</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
