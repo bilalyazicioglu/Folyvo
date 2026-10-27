@@ -25,7 +25,10 @@ export function TodayStrip({ saves, now }: { saves: SaveDto[]; now: number }) {
       </div>
       <div className="today__bars" role="img" aria-label={label}>
         {buckets.map((b) => (
-          <div key={b.hour} className={`today__hour${b.hour === current ? " is-now" : ""}`}>
+          <div
+            key={b.hour}
+            className={`today__hour${b.hour === current ? " is-now" : ""}${b.count === 0 ? " is-empty" : b.count === most ? " is-most" : ""}`}
+          >
             <span className="today__bar" style={{ height: `${b.count === 0 ? 0 : 15 + (85 * b.count) / most}%` }} />
             <span className="today__label">{b.hour % 3 === 0 ? pad(b.hour) : ""}</span>
           </div>
