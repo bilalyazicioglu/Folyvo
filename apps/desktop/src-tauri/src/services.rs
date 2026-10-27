@@ -9,7 +9,7 @@ use objc2_app_kit::{NSApplication, NSPasteboard, NSPasteboardTypeFileURL, NSUpda
 use objc2_foundation::{NSObject, NSObjectProtocol, NSString, NSURL};
 use tauri::AppHandle;
 
-use crate::intent::{act_on, Intent, IntentKind};
+use crate::intent::{act_on, from_service_allowed, Intent, IntentKind};
 
 pub struct Ivars {
     app: AppHandle,
@@ -54,7 +54,9 @@ impl ServiceProvider {
         let (Some(kind), Some(path)) = (IntentKind::from_service_message(message), first_file(pboard)) else {
             return;
         };
-        act_on(&self.ivars().app, Intent { kind, path });
+        if from_service_allowed(&path) {
+            act_on(&self.ivars().app, Intent { kind, path });
+        }
     }
 }
 
@@ -63,7 +65,8 @@ fn first_file(pboard: &NSPasteboard) -> Option<PathBuf> {
     let item = pboard.pasteboardItems()?.firstObject()?;
     // SAFETY: AppKit's own constant type name.
     let url = item.stringForType(unsafe { NSPasteboardTypeFileURL })?;
-    let path = NSURL::URLWithString(&url)?.path()?;
+    let url = NSURL::URLWithString(&url).filter(|u| u.isFileURL())?;
+    let path = url.path()?;
     Some(PathBuf::from(path.to_string()))
 }
 
