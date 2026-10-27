@@ -72,6 +72,7 @@ export function demoHandlers() {
     preview: (a: Args) => ({
       picture: a.item === "itm_demo3" ? null : PAGE,
       text: null,
+      revealsCopy: false,
       appName: a.item === "itm_demo2" ? "Microsoft Excel" : a.item === "itm_demo3" ? null : "Microsoft Word",
     }),
     item_at: (_: Args) => null,
