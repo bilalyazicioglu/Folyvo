@@ -68,7 +68,9 @@ pub fn from_link_allowed(path: &std::path::Path, home: &std::path::Path) -> bool
     use std::path::Component;
     let plain =
         |p: &std::path::Path| p.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-    if !plain(path) || !plain(home) {
+    // Without a real home folder (an empty or root path) there is nothing a link may name.
+    let has_home = home.is_absolute() && home.components().count() > 1;
+    if !has_home || !plain(path) || !plain(home) {
         return false;
     }
     let (path, home) = (path.to_string_lossy().to_lowercase(), home.to_string_lossy().to_lowercase());
@@ -206,6 +208,13 @@ mod tests {
             "/Users/a", // home itself is not a file
         ] {
             assert!(!from_link_allowed(Path::new(no), home), "{no}");
+        }
+    }
+
+    #[test]
+    fn without_a_home_folder_no_link_is_followed() {
+        for home in ["", "/", "relative"] {
+            assert!(!from_link_allowed(Path::new("/Users/a/x.docx"), Path::new(home)), "{home:?}");
         }
     }
 

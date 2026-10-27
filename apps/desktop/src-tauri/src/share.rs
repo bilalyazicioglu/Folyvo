@@ -30,6 +30,46 @@ pub fn service_key(title: &str, known: &KnownTitles) -> String {
     }
 }
 
+/// What AppKit holds only weakly while a share is under way, kept here until that share ends. A new
+/// share never drops one still running: an AirDrop reports `didShareItems` only when it finishes.
+pub struct Holding<T> {
+    next: u64,
+    held: Vec<(u64, T)>,
+}
+
+impl<T> Default for Holding<T> {
+    fn default() -> Self {
+        Holding { next: 0, held: Vec::new() }
+    }
+}
+
+impl<T> Holding<T> {
+    /// Keeps `value` and returns the number that lets it go.
+    pub fn hold(&mut self, value: T) -> u64 {
+        self.next += 1;
+        self.held.push((self.next, value));
+        self.next
+    }
+
+    /// Hands back what `id` kept, once.
+    pub fn take(&mut self, id: u64) -> Option<T> {
+        let at = self.held.iter().position(|(i, _)| *i == id)?;
+        Some(self.held.swap_remove(at).1)
+    }
+
+    pub fn release(&mut self, id: u64) {
+        self.take(id);
+    }
+
+    pub fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
+}
+
 /// The macOS share sheet, shown from a view of a Folyvo window.
 #[cfg(target_os = "macos")]
 pub mod mac {
@@ -55,6 +95,8 @@ pub mod mac {
 
     pub struct Ivars {
         on_share: RefCell<Option<OnShare>>,
+        /// Where this share's picker and delegate are kept in `SHOWN`.
+        held: std::cell::Cell<u64>,
     }
 
     define_class!(
@@ -76,6 +118,14 @@ pub mod mac {
             ) -> Option<Retained<ProtocolObject<dyn NSSharingServiceDelegate>>> {
                 Some(ProtocolObject::from_retained(self.retain()))
             }
+
+            // No service: the sheet was dismissed and nothing was shared.
+            #[unsafe(method(sharingServicePicker:didChooseSharingService:))]
+            fn did_choose(&self, _picker: &NSSharingServicePicker, service: Option<&NSSharingService>) {
+                if service.is_none() {
+                    self.finish();
+                }
+            }
         }
 
         unsafe impl NSSharingServiceDelegate for ShareDelegate {
@@ -85,18 +135,32 @@ pub mod mac {
                 if let Some(on_share) = self.ivars().on_share.borrow_mut().take() {
                     on_share(service.title().to_string());
                 }
+                self.finish();
             }
 
             #[unsafe(method(sharingService:didFailToShareItems:error:))]
             fn did_fail(&self, _service: &NSSharingService, _items: &NSArray, _error: &NSError) {
                 self.ivars().on_share.borrow_mut().take();
+                self.finish();
             }
         }
     );
 
+    impl ShareDelegate {
+        /// Lets this share's picker and delegate go once AppKit is done with the current event: they
+        /// may be in the middle of calling us, so they go to the autorelease pool, not away at once.
+        fn finish(&self) {
+            if let Some((picker, delegate)) = SHOWN.with(|s| s.borrow_mut().take(self.ivars().held.get())) {
+                let _ = Retained::autorelease_ptr(picker);
+                let _ = Retained::autorelease_ptr(delegate);
+            }
+        }
+    }
+
     thread_local! {
-        // AppKit holds the picker and its delegate weakly; the last ones stay alive here until the next share.
-        static SHOWN: RefCell<Option<(Retained<NSSharingServicePicker>, Retained<ShareDelegate>)>> = const { RefCell::new(None) };
+        // AppKit holds a picker and its delegate weakly; each pair stays here until its share ends.
+        static SHOWN: RefCell<super::Holding<(Retained<NSSharingServicePicker>, Retained<ShareDelegate>)>> =
+            RefCell::new(super::Holding::default());
     }
 
     /// The system services' titles in the person's language.
@@ -128,6 +192,7 @@ pub mod mac {
             on_share: RefCell::new(Some(Box::new(move |title: String| {
                 on_record(service_key(&title, &known))
             }))),
+            held: std::cell::Cell::new(0),
         });
         // SAFETY: NSObject's init on a freshly allocated object.
         let delegate: Retained<ShareDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -135,14 +200,27 @@ pub mod mac {
         let picker =
             unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items) };
         picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        let id = SHOWN.with(|s| s.borrow_mut().hold((picker.clone(), delegate.clone())));
+        delegate.ivars().held.set(id);
         picker.showRelativeToRect_ofView_preferredEdge(rect, view, NSRectEdge::MinY);
-        SHOWN.with(|s| *s.borrow_mut() = Some((picker, delegate)));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_share_does_not_drop_one_still_under_way() {
+        let mut held = Holding::default();
+        let airdrop = held.hold("airdrop");
+        let mail = held.hold("mail");
+        held.release(airdrop);
+        assert_eq!(held.len(), 1, "the mail share is still held");
+        held.release(airdrop);
+        held.release(mail);
+        assert_eq!(held.len(), 0);
+    }
 
     #[test]
     fn system_services_get_their_short_names() {
