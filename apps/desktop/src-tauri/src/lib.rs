@@ -4,6 +4,7 @@ pub mod commands;
 pub mod dto;
 pub mod errors;
 pub mod fit;
+pub mod intent;
 pub mod preview;
 pub mod runtime;
 pub mod toggle;
