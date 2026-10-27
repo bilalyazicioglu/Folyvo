@@ -59,6 +59,9 @@ export const api = {
   copies: (item: string) => call<CopyDto[]>("copies", { item }),
   itemAt: (path: string) => call<string | null>("item_at", { path }),
   which: (path: string) => call<MatchDto[]>("which", { path }),
+  /** The share sheet for a read-only copy of `version`, shown next to `from` (a button's rectangle). */
+  sendCopy: (item: string, version: string, from: DOMRect) =>
+    call<void>("send_copy", { item, version, x: from.x, y: from.y, w: from.width, h: from.height }),
   preview: (item: string, version: string) => call<PreviewDto>("preview", { item, version }),
   /** Opens the working file (newest) or a read-only copy of the version in its app. */
   openVersion: (item: string, version: string, newest: boolean) =>

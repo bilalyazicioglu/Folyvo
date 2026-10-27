@@ -72,6 +72,18 @@ impl AppApi {
         Ok(self.engine.events(&item)?.into_iter().map(Into::into).collect())
     }
 
+    /// A read-only copy of `version` under the file's own name, for the share sheet.
+    pub fn share_file(&self, item: &str, version: &str) -> Result<std::path::PathBuf, UserError> {
+        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        Ok(self.engine.materialise(&item, &version)?)
+    }
+
+    /// Remembers that `service` took a copy of `version` from the share sheet.
+    pub fn record_share(&self, item: &str, version: &str, service: &str) -> Result<CopyDto, UserError> {
+        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        Ok(self.engine.record_handed(&item, &version, service)?.into())
+    }
+
     /// The item Folyvo tracks at `path`, if any.
     pub fn item_at(&self, path: &str) -> Result<Option<String>, UserError> {
         Ok(self.engine.item_at(Path::new(path))?.map(|i| i.to_string()))
@@ -263,6 +275,18 @@ mod tests {
         let item = r.item();
         let v = r.api.history(&item).unwrap()[0].id.clone();
         assert!(!r.api.preview(&item, &v).unwrap().reveals_copy);
+    }
+
+    #[test]
+    fn a_share_is_recorded_once_as_attached_in_mail() {
+        let r = rig();
+        r.save("teklif.docx", b"one");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        let c = r.api.record_share(&item, &v, "mail").unwrap();
+        assert_eq!((c.kind, c.service.as_deref()), (crate::dto::CopyKind::Handed, Some("mail")));
+        assert_eq!(r.api.copies(&item).unwrap().len(), 1);
+        assert_eq!(r.api.record_share(&item, &v, "fax").unwrap_err().code, "bad_request");
     }
 
     #[test]
