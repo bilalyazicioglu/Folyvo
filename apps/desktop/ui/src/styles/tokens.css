@@ -17,6 +17,13 @@
   /* How much of the page colour lies over the native glass, and the light caught by its edge. */
   --glass-tint: 30%;
   --glass-rim: rgb(255 255 255 / 0.6);
+  /* An open row lifts off the glass; the stage is the neutral table the pages lie on. */
+  --raised: rgb(255 255 255 / 0.72);
+  --soft-line: rgb(0 0 0 / 0.08);
+  --faint: rgb(0 0 0 / 0.1);
+  --stage-bg: #f2f2f5;
+  --side-tint: 45%;
+  --accent-soft: rgb(31 122 77 / 0.2);
   --font: -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
 }
 
@@ -34,9 +41,15 @@
     --accent-text: #5fd08f;
     --glass-tint: 40%;
     --glass-rim: rgb(255 255 255 / 0.18);
+    --raised: rgb(255 255 255 / 0.1);
+    --soft-line: rgb(255 255 255 / 0.1);
+    --faint: rgb(255 255 255 / 0.12);
+    --stage-bg: #1b1b20;
+    --side-tint: 40%;
+    --accent-soft: rgb(95 208 143 / 0.22);
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root { --glass-tint: 100%; }
+  :root { --glass-tint: 100%; --side-tint: 100%; }
 }

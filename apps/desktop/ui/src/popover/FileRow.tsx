@@ -2,7 +2,7 @@ import type { CopyDto } from "../generated/CopyDto";
 import type { ItemSummaryDto } from "../generated/ItemSummaryDto";
 import type { SaveDto } from "../generated/SaveDto";
 import { copyLabel } from "../copies";
-import { fileKind } from "../files";
+import { DocIcon } from "../components/DocIcon";
 import { useCopies } from "../queries";
 import { clock, middleTruncate, whenLabel } from "../time";
 
@@ -47,7 +47,7 @@ export function FileRow({ item, saves, copies, now, start, open, onToggle, onOpe
         aria-describedby={subId}
         onClick={onToggle}
       >
-        <span className={`tile tile--${fileKind(item.name)}`} aria-hidden="true" />
+        <DocIcon name={item.name} />
         <span className="file__text">
           <span className="sr-only">{item.name}</span>
           <span className="file__name" title={item.name} aria-hidden="true">
