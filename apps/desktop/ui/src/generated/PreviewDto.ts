@@ -13,7 +13,7 @@ picture: string | null,
  */
 text: string | null, 
 /**
- * An older copy of this kind runs something when opened, so it is shown in Finder instead.
+ * An older copy of this kind is not a document and could run something, so it is shown in Finder.
  */
 revealsCopy: boolean, 
 /**
