@@ -285,3 +285,22 @@ test("opened to save a copy, the window saves the newest once", async () => {
   await userEvent.click(await option("09:58"));
   expect(b.called("export")).toHaveLength(1);
 });
+
+test("send a copy hands the chosen time to the share sheet", async () => {
+  const b = backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await option("09:58"));
+  await userEvent.click(screen.getByRole("button", { name: "Send a Copy…" }));
+  const args = b.called("send_copy")[0].args as Record<string, unknown>;
+  expect([args.item, args.version]).toEqual(["itm_01", "ver_02"]);
+  for (const k of ["x", "y", "w", "h"]) expect(typeof args[k]).toBe("number");
+});
+
+test("opened to send a copy, the share sheet opens once for the newest save", async () => {
+  const b = backend();
+  renderWithClient(<Versions itemId="itm_01" action="send" />);
+  await waitFor(() => expect(b.called("send_copy")).toHaveLength(1));
+  expect((b.called("send_copy")[0].args as Record<string, unknown>).version).toBe("ver_03");
+  await userEvent.click(await option("09:58"));
+  expect(b.called("send_copy")).toHaveLength(1);
+});

@@ -83,6 +83,71 @@ pub async fn open_version(rt: Rt<'_>, item: String, version: String, newest: boo
     blocking(move || api.open_version(&item, &version, newest)).await
 }
 
+/// Shows the share sheet for a read-only copy of `version`, next to the button at `x, y, w, h` in the
+/// calling window. A service that takes the file is recorded as a handed copy.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn send_copy(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    rt: Rt<'_>,
+    item: String,
+    version: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), UserError> {
+    let api = rt.api();
+    let (i, v) = (item.clone(), version.clone());
+    let file = blocking(move || api.share_file(&i, &v)).await?;
+    show_share(app, window, item, version, file, (x, y, w, h))
+}
+
+#[cfg(target_os = "macos")]
+fn show_share(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    item: String,
+    version: String,
+    file: PathBuf,
+    (x, y, w, h): (f64, f64, f64, f64),
+) -> Result<(), UserError> {
+    window
+        .with_webview(move |wv| {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::NSView;
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            // SAFETY: with_webview runs on the main thread with the window's live WKWebView, an NSView.
+            let view: &NSView = unsafe { &*(wv.inner() as *const NSView) };
+            let y = if view.isFlipped() { y } else { view.bounds().size.height - y - h };
+            let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+            crate::share::mac::show(mtm, view, rect, &file, move |service| {
+                if let Some(rt) = app.try_state::<Arc<AppRuntime>>() {
+                    let _ = rt.api().record_share(&item, &version, &service);
+                }
+            });
+        })
+        .map_err(|_| UserError::internal())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_share(
+    _app: AppHandle,
+    _window: tauri::WebviewWindow,
+    _item: String,
+    _version: String,
+    _file: PathBuf,
+    _rect: (f64, f64, f64, f64),
+) -> Result<(), UserError> {
+    Err(UserError::new(
+        "not_supported",
+        "Send a Copy needs macOS",
+        "Use Save a Copy… to copy the file out instead.",
+    ))
+}
+
 #[tauri::command]
 pub async fn which(rt: Rt<'_>, path: String) -> Result<Vec<MatchDto>, UserError> {
     let api = rt.api();

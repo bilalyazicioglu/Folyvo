@@ -24,6 +24,7 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
   const restoreRef = useRef<HTMLButtonElement>(null);
   const asked = useRef(false);
   const started = useRef(false);
+  const sendRef = useRef<HTMLButtonElement>(null);
   const [saved, setSaved] = useState<{ folder: string; path: string } | null>(null);
 
   const summary = file.data;
@@ -48,9 +49,10 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
   // Finder's or Services' "Save a Copy…" acts on the newest save, once. Above the early return, so
   // the hooks run in the same order on every render; saveCopy is defined by the time it runs.
   useEffect(() => {
-    if (started.current || action !== "save" || versions.length === 0) return;
+    if (started.current || (action !== "save" && action !== "send") || versions.length === 0) return;
     started.current = true;
-    void saveCopy();
+    if (action === "save") void saveCopy();
+    else void sendCopy(sendRef.current);
   });
 
   const failure = history.error ?? file.error;
@@ -92,6 +94,11 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
     if (!dir) return;
     const r = await act.run(() => api.exportVersion(itemId, selected.id, dir));
     if (r.ok) setSaved({ folder: folderName(dir), path: r.value.destination });
+  };
+
+  const sendCopy = (from: HTMLElement | null) => {
+    const rect = from?.getBoundingClientRect() ?? new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0);
+    void act.run(() => api.sendCopy(itemId, selected.id, rect));
   };
 
   const restore = async () => {
@@ -168,6 +175,15 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
             </button>
             <button type="button" className="btn" disabled={act.busy} onClick={() => void saveCopy()}>
               Save a Copy…
+            </button>
+            <button
+              type="button"
+              className="btn"
+              ref={sendRef}
+              disabled={act.busy}
+              onClick={(e) => sendCopy(e.currentTarget)}
+            >
+              Send a Copy…
             </button>
             {!newest && !confirming && (
               <button

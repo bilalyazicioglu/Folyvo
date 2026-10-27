@@ -7,6 +7,7 @@ pub mod fit;
 pub mod intent;
 pub mod preview;
 pub mod runtime;
+pub mod share;
 pub mod toggle;
 pub mod tray;
 
@@ -53,6 +54,7 @@ pub fn run() {
             commands::set_dialog_open,
             commands::reveal,
             commands::take_which,
+            commands::send_copy,
         ])
         .manage(tray::PendingWhich::default())
         .manage(intent::PendingIntent::default())
