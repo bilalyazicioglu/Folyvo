@@ -1,6 +1,7 @@
 //! A picture of a version and the app that opens it. Pictures come from Quick Look's command-line
 //! tool, run on a read-only copy of the version (never on the working file) and kept in a cache.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -23,6 +24,34 @@ pub fn thumbnail(src: &Path, cache_dir: &Path, key: &str) -> Option<PathBuf> {
     let drawn = tmp.path().join(format!("{}.png", src.file_name()?.to_string_lossy()));
     std::fs::rename(&drawn, &out).ok()?;
     Some(out)
+}
+
+/// Kinds shown as their own words. Quick Look draws plain text dark-on-dark in the dark appearance.
+const TEXT_KINDS: &[&str] =
+    &["txt", "text", "md", "markdown", "csv", "tsv", "json", "log", "xml", "yml", "yaml"];
+/// The most of a text file that is shown: its first lines, and never more than this many bytes.
+pub const EXCERPT_LINES: usize = 60;
+pub const EXCERPT_BYTES: usize = 16 * 1024;
+
+/// The first lines of a plain text file, or `None` when `src` is not one or is not UTF-8 text.
+pub fn text_excerpt(src: &Path) -> Option<String> {
+    let ext = src.extension()?.to_str()?.to_ascii_lowercase();
+    if !TEXT_KINDS.contains(&ext.as_str()) {
+        return None;
+    }
+    let mut head = Vec::with_capacity(EXCERPT_BYTES);
+    std::fs::File::open(src).ok()?.take(EXCERPT_BYTES as u64).read_to_end(&mut head).ok()?;
+    let text = match std::str::from_utf8(&head) {
+        Ok(t) => t,
+        // A character cut by the byte limit is dropped; anything else is not text.
+        Err(e) if e.error_len().is_none() => std::str::from_utf8(&head[..e.valid_up_to()]).ok()?,
+        Err(_) => return None,
+    };
+    if text.contains('\0') {
+        return None;
+    }
+    let end = text.match_indices('\n').nth(EXCERPT_LINES - 1).map_or(text.len(), |(i, _)| i + 1);
+    Some(text[..end].to_string())
 }
 
 const QUICK_LOOK: &str = "/usr/bin/qlmanage";
@@ -131,6 +160,34 @@ mod tests {
         fs::write(&src, (0..4096u32).map(|i| (i * 7919 % 251) as u8).collect::<Vec<_>>()).unwrap();
         assert_eq!(thumbnail(&src, &dir.path().join("cache"), "z"), None);
         assert!(fs::read_dir(dir.path().join("cache")).map(|d| d.count()).unwrap_or(0) == 0, "no leftovers");
+    }
+
+    #[test]
+    fn a_text_file_is_shown_as_its_own_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("Toplantı notları.txt");
+        fs::write(&p, "Fiyatlar güncellendi\nçarşamba 10:12\n").unwrap();
+        assert_eq!(text_excerpt(&p).as_deref(), Some("Fiyatlar güncellendi\nçarşamba 10:12\n"));
+    }
+
+    #[test]
+    fn a_long_text_file_is_cut_after_its_first_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("log.md");
+        fs::write(&p, "satır ğüşiöç\n".repeat(5_000)).unwrap();
+        let text = text_excerpt(&p).unwrap();
+        assert_eq!(text.lines().count(), EXCERPT_LINES);
+        assert!(text.len() <= EXCERPT_BYTES);
+    }
+
+    #[test]
+    fn only_plain_text_is_read_as_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("x.txt");
+        fs::write(&binary, [b'a', 0, 0xff, 0xfe, b'b']).unwrap();
+        assert_eq!(text_excerpt(&binary), None, "a .txt full of bytes is not text");
+        let src = docx(dir.path());
+        assert_eq!(text_excerpt(&src), None, "a docx is drawn by Quick Look");
     }
 
     #[test]

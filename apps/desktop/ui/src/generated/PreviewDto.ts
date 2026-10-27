@@ -9,6 +9,10 @@ export type PreviewDto = {
  */
 picture: string | null, 
 /**
+ * The first lines of a plain text file, shown as words on a page instead of a picture.
+ */
+text: string | null, 
+/**
  * The app that opens this kind of file, such as "Microsoft Word".
  */
 appName: string | null, };

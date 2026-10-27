@@ -281,6 +281,8 @@ impl From<Match> for MatchDto {
 pub struct PreviewDto {
     /// `data:image/png;base64,...`, or none when Quick Look cannot draw this kind of file.
     pub picture: Option<String>,
+    /// The first lines of a plain text file, shown as words on a page instead of a picture.
+    pub text: Option<String>,
     /// The app that opens this kind of file, such as "Microsoft Word".
     pub app_name: Option<String>,
 }
