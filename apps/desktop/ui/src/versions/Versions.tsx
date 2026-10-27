@@ -62,7 +62,15 @@ export function Versions({ itemId }: { itemId: string }) {
   const left = (copies.data ?? []).filter((c) => c.versionId === selected.id);
   const kind = fileKind(name);
   const app = preview.data?.appName;
-  const openLabel = newest ? (app ? `Open in ${app}` : "Open") : app ? `Open a Copy in ${app}` : "Open a Copy";
+  const openLabel = newest
+    ? app
+      ? `Open in ${app}`
+      : "Open"
+    : preview.data?.revealsCopy
+      ? "Show a Copy in Finder"
+      : app
+        ? `Open a Copy in ${app}`
+        : "Open a Copy";
 
   const select = (id: string) => {
     setSelectedId(id);

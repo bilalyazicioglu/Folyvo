@@ -100,9 +100,55 @@ pub fn default_app_name(_path: &Path) -> Option<String> {
     None
 }
 
-/// Open `path` in its default app, as one argument and without a shell.
-pub fn open_in_app(path: &Path) -> std::io::Result<()> {
-    let status = Command::new("/usr/bin/open").arg(path).status()?;
+/// Kinds that run something when opened: apps, scripts, installers and links. A copy Folyvo writes
+/// out carries no "downloaded from the internet" mark, so macOS would run it without asking.
+const RUNS_SOMETHING: &[&str] = &[
+    "app",
+    "command",
+    "tool",
+    "terminal",
+    "sh",
+    "scpt",
+    "applescript",
+    "workflow",
+    "action",
+    "pkg",
+    "mpkg",
+    "webloc",
+    "inetloc",
+    "fileloc",
+    "jar",
+];
+
+/// What opening a file should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opening {
+    /// Open it in its app.
+    Open,
+    /// Show it selected in Finder; the person opens it there and macOS asks as it would for any such file.
+    Reveal,
+}
+
+/// How to open `path`. A `copy` of a kind that runs something is shown in Finder instead of opened.
+pub fn how_to_open(path: &Path, copy: bool) -> Opening {
+    let runs = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| RUNS_SOMETHING.contains(&e.to_ascii_lowercase().as_str()));
+    if copy && runs {
+        Opening::Reveal
+    } else {
+        Opening::Open
+    }
+}
+
+/// Open `path` in its default app, or show it in Finder, as one argument and without a shell.
+pub fn open_in_app(path: &Path, how: Opening) -> std::io::Result<()> {
+    let mut open = Command::new("/usr/bin/open");
+    if how == Opening::Reveal {
+        open.arg("-R");
+    }
+    let status = open.arg(path).status()?;
     if status.success() {
         Ok(())
     } else {
@@ -188,6 +234,35 @@ mod tests {
         assert_eq!(text_excerpt(&binary), None, "a .txt full of bytes is not text");
         let src = docx(dir.path());
         assert_eq!(text_excerpt(&src), None, "a docx is drawn by Quick Look");
+    }
+
+    #[test]
+    fn a_copy_that_would_run_something_is_shown_in_finder_not_opened() {
+        for name in [
+            "Run me.command",
+            "a.app",
+            "link.webloc",
+            "x.inetloc",
+            "f.fileloc",
+            "s.scpt",
+            "w.workflow",
+            "i.pkg",
+            "t.terminal",
+            "t.tool",
+            "sh.sh",
+        ] {
+            assert_eq!(how_to_open(Path::new(name), true), Opening::Reveal, "{name}");
+        }
+        assert_eq!(how_to_open(Path::new("RUN.COMMAND"), true), Opening::Reveal, "case does not matter");
+    }
+
+    #[test]
+    fn documents_and_the_working_file_open_in_their_app() {
+        for name in ["Teklif.docx", "notlar.txt", "b.xlsx", "p.pdf", "noextension"] {
+            assert_eq!(how_to_open(Path::new(name), true), Opening::Open, "{name}");
+        }
+        // The working file keeps its own quarantine mark, so macOS still asks before running it.
+        assert_eq!(how_to_open(Path::new("Run me.command"), false), Opening::Open);
     }
 
     #[test]

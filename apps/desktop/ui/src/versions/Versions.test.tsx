@@ -266,3 +266,12 @@ test("a text file is shown as its own words on a page, never as a field", async 
   expect(screen.queryByText("No preview for this kind of file.")).not.toBeInTheDocument();
   expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
 });
+
+test("an older copy that would run something is shown in Finder, and the button says so", async () => {
+  const b = backend();
+  b.state.handlers.preview = () => ({ picture: null, text: null, appName: "Terminal", revealsCopy: true });
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await screen.findByRole("button", { name: "Older save" }));
+  expect(await screen.findByRole("button", { name: "Show a Copy in Finder" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Open a Copy/ })).not.toBeInTheDocument();
+});

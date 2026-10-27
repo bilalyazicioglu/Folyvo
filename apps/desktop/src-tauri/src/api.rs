@@ -99,15 +99,16 @@ impl AppApi {
             .map(|v| v.content_hash.to_string())
             .ok_or(folyvo_core::CoreError::VersionMissing(version.clone()))?;
         let app_name = preview::default_app_name(&copy);
+        let reveals_copy = preview::how_to_open(&copy, true) == preview::Opening::Reveal;
         if let Some(text) = preview::text_excerpt(&copy) {
-            return Ok(PreviewDto { picture: None, text: Some(text), app_name });
+            return Ok(PreviewDto { picture: None, text: Some(text), reveals_copy, app_name });
         }
         let cache = std::env::temp_dir().join("folyvo-previews");
         let picture =
             preview::thumbnail(&copy, &cache, &key).and_then(|png| std::fs::read(png).ok()).map(|bytes| {
                 format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
             });
-        Ok(PreviewDto { picture, text: None, app_name })
+        Ok(PreviewDto { picture, text: None, reveals_copy, app_name })
     }
 
     /// Open the working file (`newest`, when it exists) or a read-only copy of `version` in its app.
@@ -115,11 +116,11 @@ impl AppApi {
         let (item_id, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
         let working =
             self.engine.item(&item_id)?.path.map(std::path::PathBuf::from).filter(|p| newest && p.is_file());
-        let target = match working {
-            Some(p) => p,
-            None => self.engine.materialise(&item_id, &version)?,
+        let (target, copy) = match working {
+            Some(p) => (p, false),
+            None => (self.engine.materialise(&item_id, &version)?, true),
         };
-        preview::open_in_app(&target).map_err(|_| UserError::internal())
+        preview::open_in_app(&target, preview::how_to_open(&target, copy)).map_err(|_| UserError::internal())
     }
 
     pub fn stats(&self) -> Result<VaultStatsDto, UserError> {
@@ -248,6 +249,20 @@ mod tests {
         let v = r.api.history(&item).unwrap()[0].id.clone();
         let out = r.api.export(&item, &v, &r.out()).unwrap();
         assert_eq!(out.version_id, v);
+    }
+
+    #[test]
+    fn preview_says_when_a_copy_is_shown_in_finder_instead_of_opened() {
+        let r = rig();
+        r.save("Run me.command", b"echo hi\n");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        assert!(r.api.preview(&item, &v).unwrap().reveals_copy);
+        let r = rig();
+        r.save("teklif.txt", b"Teklif\n");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        assert!(!r.api.preview(&item, &v).unwrap().reveals_copy);
     }
 
     #[test]

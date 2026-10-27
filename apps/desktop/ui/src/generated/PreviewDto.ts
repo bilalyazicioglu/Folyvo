@@ -13,6 +13,10 @@ picture: string | null,
  */
 text: string | null, 
 /**
+ * An older copy of this kind runs something when opened, so it is shown in Finder instead.
+ */
+revealsCopy: boolean, 
+/**
  * The app that opens this kind of file, such as "Microsoft Word".
  */
 appName: string | null, };
