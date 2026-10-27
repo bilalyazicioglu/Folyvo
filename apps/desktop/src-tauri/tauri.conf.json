@@ -7,7 +7,7 @@
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm --prefix ui run dev",
-    "beforeBuildCommand": "npm --prefix ui run build"
+    "beforeBuildCommand": "npm --prefix ui run build && bash finder/build.sh"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -27,6 +27,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns"
     ],
-    "category": "Productivity"
+    "category": "Productivity",
+    "macOS": {
+      "files": {
+        "PlugIns/FolyvoFinderSync.appex": "../finder/build/FolyvoFinderSync.appex"
+      },
+      "signingIdentity": "-"
+    }
   }
 }

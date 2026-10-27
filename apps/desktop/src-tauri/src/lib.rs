@@ -28,6 +28,24 @@ pub fn vault_dir(env_override: Option<OsString>, data_dir: &Path) -> PathBuf {
     }
 }
 
+/// Whether the app runs from an installed `.app` bundle, the only place its Finder extension exists.
+pub fn runs_from_bundle(exe: &Path) -> bool {
+    exe.ancestors().any(|p| p.extension().is_some_and(|e| e == "app"))
+}
+
+/// Turns on the Finder extension that ships inside Folyvo.app, so its items appear without a visit to
+/// System Settings. macOS keeps the person's choice if they turn it off there later.
+#[cfg(target_os = "macos")]
+fn enable_finder_extension() {
+    if std::env::current_exe().is_ok_and(|exe| runs_from_bundle(&exe)) {
+        std::thread::spawn(|| {
+            let _ = std::process::Command::new("/usr/bin/pluginkit")
+                .args(["-e", "use", "-i", "dev.folyvo.app.findersync"])
+                .status();
+        });
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
@@ -77,7 +95,10 @@ pub fn run() {
             app.manage(runtime);
             tray::build(app)?;
             #[cfg(target_os = "macos")]
-            services::register(app.handle());
+            {
+                services::register(app.handle());
+                enable_finder_extension();
+            }
             // A Finder or Services request that launched Folyvo is answered once the engine is up.
             if let Some(intent) = app.state::<intent::PendingIntent>().0.lock().unwrap().take() {
                 intent::act_on(app.handle(), intent);
@@ -130,6 +151,14 @@ mod tests {
                 "{entry}"
             );
         }
+    }
+
+    #[test]
+    fn only_a_bundled_app_enables_its_finder_extension() {
+        assert!(runs_from_bundle(std::path::Path::new(
+            "/Applications/Folyvo.app/Contents/MacOS/folyvo-desktop"
+        )));
+        assert!(!runs_from_bundle(std::path::Path::new("/Users/a/folyvo/target/debug/folyvo-desktop")));
     }
 
     #[test]
