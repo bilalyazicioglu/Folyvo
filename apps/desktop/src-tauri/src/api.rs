@@ -98,12 +98,16 @@ impl AppApi {
             .find(|v| v.id == version)
             .map(|v| v.content_hash.to_string())
             .ok_or(folyvo_core::CoreError::VersionMissing(version.clone()))?;
+        let app_name = preview::default_app_name(&copy);
+        if let Some(text) = preview::text_excerpt(&copy) {
+            return Ok(PreviewDto { picture: None, text: Some(text), app_name });
+        }
         let cache = std::env::temp_dir().join("folyvo-previews");
         let picture =
             preview::thumbnail(&copy, &cache, &key).and_then(|png| std::fs::read(png).ok()).map(|bytes| {
                 format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
             });
-        Ok(PreviewDto { picture, app_name: preview::default_app_name(&copy) })
+        Ok(PreviewDto { picture, text: None, app_name })
     }
 
     /// Open the working file (`newest`, when it exists) or a read-only copy of `version` in its app.
@@ -255,18 +259,38 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn preview_of_a_saved_text_file_has_a_picture_and_an_app() {
+    fn preview_of_a_saved_text_file_is_its_words_and_an_app() {
         let r = rig();
         r.save("notlar.txt", "Toplantı notları\nfiyatlar güncellendi\n".as_bytes());
         let item = r.item();
         let v = r.api.history(&item).unwrap()[0].id.clone();
         let p = r.api.preview(&item, &v).unwrap();
-        assert!(
-            p.picture.as_deref().is_some_and(|d| d.starts_with("data:image/png;base64,")),
-            "{:?}",
-            p.picture.map(|d| d.len())
-        );
+        assert_eq!(p.text.as_deref(), Some("Toplantı notları\nfiyatlar güncellendi\n"));
+        assert_eq!(p.picture, None, "plain text is never a Quick Look picture");
         assert!(p.app_name.is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn preview_of_a_saved_docx_is_a_picture() {
+        let r = rig();
+        let dir = tempfile::tempdir().unwrap();
+        let txt = dir.path().join("t.txt");
+        std::fs::write(&txt, "Teklif\n").unwrap();
+        let docx = dir.path().join("t.docx");
+        let ok = std::process::Command::new("textutil")
+            .args(["-convert", "docx", "-output"])
+            .arg(&docx)
+            .arg(&txt)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        r.save("teklif.docx", &std::fs::read(&docx).unwrap());
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        let p = r.api.preview(&item, &v).unwrap();
+        assert!(p.picture.as_deref().is_some_and(|d| d.starts_with("data:image/png;base64,")));
+        assert_eq!(p.text, None);
     }
 
     #[test]

@@ -256,3 +256,13 @@ test("throwing the page aside shows the save before it, a nudge does not", async
   drag(-180);
   expect(await option("10:12")).toHaveAttribute("aria-selected", "true");
 });
+
+test("a text file is shown as its own words on a page, never as a field", async () => {
+  const b = backend();
+  b.state.handlers.preview = () => ({ picture: null, text: "Toplantı notları\nfiyatlar güncellendi\n", appName: "TextEdit" });
+  const { container } = renderWithClient(<Versions itemId="itm_01" />);
+  const page = await screen.findByRole("img", { name: `Picture of ${NAME} as it was Today 10:12` });
+  expect(page).toHaveTextContent("Toplantı notları fiyatlar güncellendi");
+  expect(screen.queryByText("No preview for this kind of file.")).not.toBeInTheDocument();
+  expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
+});
