@@ -105,9 +105,11 @@ fn glass(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn glass(_window: &tauri::WebviewWindow) {}
 
-/// Opens the versions window for an item, creating it the first time.
-pub fn open_versions(app: &AppHandle, item: &str) -> tauri::Result<()> {
-    let url = format!("index.html?view=versions&item={item}");
+/// Opens the versions window for an item, creating it the first time. `action` (`send` or `save`)
+/// asks the window to start Send a Copy or Save a Copy for the newest save once it has loaded.
+pub fn open_versions(app: &AppHandle, item: &str, action: Option<&str>) -> tauri::Result<()> {
+    let action = action.map(|a| format!("&action={a}")).unwrap_or_default();
+    let url = format!("index.html?view=versions&item={item}{action}");
     if let Some(w) = app.get_webview_window("versions") {
         w.eval(format!("window.location.replace('/{url}')"))?;
         w.show()?;
@@ -158,3 +160,22 @@ fn window_glass(window: &tauri::WebviewWindow) {
 
 #[cfg(not(target_os = "macos"))]
 fn window_glass(_window: &tauri::WebviewWindow) {}
+
+/// A file someone asked "which one is this?" about, waiting for the popover to take it.
+#[derive(Default)]
+pub struct PendingWhich(pub Mutex<Option<String>>);
+
+/// Shows the popover under the menu bar icon and has it answer "which one is this?" for `path`.
+pub fn show_which(app: &AppHandle, path: &std::path::Path) -> tauri::Result<()> {
+    if let Some(pending) = app.try_state::<PendingWhich>() {
+        *pending.0.lock().unwrap() = Some(path.to_string_lossy().into_owned());
+    }
+    let Some(window) = app.get_webview_window("popover") else { return Ok(()) };
+    // Before the menu bar icon was ever clicked its position is unknown; the top right is where it lives.
+    if window.move_window(Position::TrayBottomCenter).is_err() {
+        let _ = window.move_window(Position::TopRight);
+    }
+    window.show()?;
+    window.set_focus()?;
+    app.emit_to("popover", "intent-which", ())
+}

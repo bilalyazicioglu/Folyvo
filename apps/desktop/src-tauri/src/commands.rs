@@ -122,7 +122,7 @@ pub async fn remove_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
 #[tauri::command]
 pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
     folyvo_core::model::ItemId::parse(&item).map_err(UserError::from)?;
-    crate::tray::open_versions(&app, &item).map_err(|_| UserError::internal())
+    crate::tray::open_versions(&app, &item, None).map_err(|_| UserError::internal())
 }
 
 /// The popover asks for the height of its content; the window follows within limits.
@@ -164,4 +164,10 @@ pub fn reveal(path: String) -> Result<(), UserError> {
     }
     std::process::Command::new("open").arg("-R").arg(&p).status().map_err(|_| UserError::internal())?;
     Ok(())
+}
+
+/// The file waiting for a "which one is this?" answer, taken so it is answered once.
+#[tauri::command]
+pub fn take_which(pending: State<'_, crate::tray::PendingWhich>) -> Option<String> {
+    pending.0.lock().unwrap().take()
 }

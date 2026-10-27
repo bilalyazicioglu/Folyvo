@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -28,7 +29,11 @@ export class AppError extends Error {
 }
 
 function isUserError(e: unknown): e is UserError {
-  return typeof e === "object" && e !== null && ["code", "title", "hint"].every((k) => typeof (e as Record<string, unknown>)[k] === "string");
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    ["code", "title", "hint"].every((k) => typeof (e as Record<string, unknown>)[k] === "string")
+  );
 }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -47,7 +52,8 @@ export const api = {
   item: (item: string) => call<ItemSummaryDto>("item", { item }),
   history: (item: string) => call<VersionDto[]>("history", { item }),
   nameVersion: (version: string, note: string | null) => call<void>("name_version", { version, note }),
-  exportVersion: (item: string, version: string, destDir: string) => call<ExportDto>("export", { item, version, destDir }),
+  exportVersion: (item: string, version: string, destDir: string) =>
+    call<ExportDto>("export", { item, version, destDir }),
   /** Saves and copies with from <= time < to (unix ms). */
   activity: (from: number, to: number) => call<ActivityDto>("activity", { from, to }),
   copies: (item: string) => call<CopyDto[]>("copies", { item }),
@@ -55,7 +61,8 @@ export const api = {
   which: (path: string) => call<MatchDto[]>("which", { path }),
   preview: (item: string, version: string) => call<PreviewDto>("preview", { item, version }),
   /** Opens the working file (newest) or a read-only copy of the version in its app. */
-  openVersion: (item: string, version: string, newest: boolean) => call<void>("open_version", { item, version, newest }),
+  openVersion: (item: string, version: string, newest: boolean) =>
+    call<void>("open_version", { item, version, newest }),
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
   folders: () => call<FolderDto[]>("folders"),
@@ -73,6 +80,19 @@ export const api = {
       else if (payload.type === "leave") cb({ type: "leave" });
       else cb({ type: "over" });
     }),
+  /**
+   * Files someone asked "which one is this?" about from Finder or Services. The path waits in the app
+   * until taken, so a request that arrives before this page listens is answered when it starts.
+   */
+  onIntentWhich: async (cb: (path: string) => void): Promise<() => void> => {
+    const take = async () => {
+      const path = await call<string | null>("take_which");
+      if (path) cb(path);
+    };
+    const stop = await listen("intent-which", () => void take());
+    void take();
+    return stop;
+  },
   closeWindow: () => getCurrentWindow().close(),
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
   /** A standard macOS notification. Asks for permission once; a refusal stays silent. */

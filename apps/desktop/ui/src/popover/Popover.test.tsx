@@ -257,3 +257,19 @@ test("the keeping line opens the watched folders, which are not named twice", as
   expect(screen.queryByText(/Watched folders/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeInTheDocument();
 });
+
+test("a which-one request from Finder answers in the popover like a drop", async () => {
+  let fire: (path: string) => void = () => {};
+  vi.spyOn(api, "onIntentWhich").mockImplementation((cb) => {
+    fire = cb;
+    return Promise.resolve(() => {});
+  });
+  const b = backend();
+  b.state.handlers.item_at = () => null;
+  b.state.handlers.which = () => [];
+  renderWithClient(<Popover />);
+  await screen.findByRole("heading", { name: "Today" });
+  act(() => fire("/Users/a/Downloads/back.docx"));
+  expect(await screen.findByRole("status")).toHaveTextContent("No saved version has exactly this content.");
+  expect(b.called("which")[0].args).toEqual({ path: "/Users/a/Downloads/back.docx" });
+});

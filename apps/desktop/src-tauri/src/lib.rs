@@ -52,7 +52,10 @@ pub fn run() {
             commands::fit_popover,
             commands::set_dialog_open,
             commands::reveal,
+            commands::take_which,
         ])
+        .manage(tray::PendingWhich::default())
+        .manage(intent::PendingIntent::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -69,15 +72,36 @@ pub fn run() {
             .map_err(|e| e.to_string())?;
             app.manage(runtime);
             tray::build(app)?;
+            // A Finder or Services request that launched Folyvo is answered once the engine is up.
+            if let Some(intent) = app.state::<intent::PendingIntent>().0.lock().unwrap().take() {
+                intent::act_on(app.handle(), intent);
+            }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Folyvo could not start");
+        .build(tauri::generate_context!())
+        .expect("Folyvo could not start")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                if let Some(intent) = urls.iter().find_map(|u| intent::parse_url(u.as_str())) {
+                    intent::act_on(app, intent);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_app_registers_the_folyvo_url_scheme() {
+        let plist = include_str!("../Info.plist");
+        let schemes = plist.split("<key>CFBundleURLSchemes</key>").nth(1).expect("a URL scheme is declared");
+        assert!(schemes.trim_start().starts_with("<array><string>folyvo</string></array>"), "{plist}");
+    }
 
     #[test]
     fn the_app_is_named_folyvo() {

@@ -18,6 +18,21 @@ function keeping(folders: { path: string }[]): string {
     : `Keeping every save in ${folders.length} folders`;
 }
 
+/** A failed lookup: a folder is refused plainly, anything else shows its error. */
+function failed(e: unknown): Dropped {
+  const error = e instanceof AppError ? e.info : INTERNAL_ERROR;
+  return error.code === "not_a_file" ? { kind: "folder" } : { kind: "error", error };
+}
+
+/** Which saved version a file is, if any. */
+async function answerWhich(path: string): Promise<Dropped> {
+  try {
+    return { kind: "matches", matches: await api.which(path) };
+  } catch (e) {
+    return failed(e);
+  }
+}
+
 /** Tracked file → its history; anything else → which saved version it is, if any. */
 async function answerDrop(path: string): Promise<Dropped | null> {
   try {
@@ -26,11 +41,10 @@ async function answerDrop(path: string): Promise<Dropped | null> {
       await api.openHistory(item);
       return null;
     }
-    return { kind: "matches", matches: await api.which(path) };
   } catch (e) {
-    const error = e instanceof AppError ? e.info : INTERNAL_ERROR;
-    return error.code === "not_a_file" ? { kind: "folder" } : { kind: "error", error };
+    return failed(e);
   }
+  return answerWhich(path);
 }
 
 export function Popover() {
@@ -70,13 +84,20 @@ export function Popover() {
     return () => void stop.then((f) => f());
   }, []);
 
+  // "Which One Is This?…" from Finder or Services.
+  useEffect(() => {
+    const stop = api.onIntentWhich((path) => void answerWhich(path).then(setDropped));
+    return () => void stop.then((f) => f());
+  }, []);
+
   const addFolder = async () => {
     const picked = await api.chooseFolder("Choose a folder to watch");
     if (picked) await act.run(() => api.addFolder(picked));
   };
   const removeFolder = (path: string) => void act.run(() => api.removeFolder(path));
 
-  if (folders.isPending || recent.isPending) return <main className="popover" aria-busy="true" aria-label="Folyvo" ref={root} />;
+  if (folders.isPending || recent.isPending)
+    return <main className="popover" aria-busy="true" aria-label="Folyvo" ref={root} />;
 
   const folderList = folders.data ?? [];
   const items = recent.data ?? [];

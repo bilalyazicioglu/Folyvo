@@ -10,8 +10,9 @@ import { needsSeconds, whenLabel } from "../time";
 import { Stage } from "./Stage";
 import { TimeList } from "./TimeList";
 
-/** One file's saved times: a picture of each, and Open, Save a Copy and Restore. */
-export function Versions({ itemId }: { itemId: string }) {
+/** One file's saved times: a picture of each, and Open, Save a Copy and Restore. `action` ("save" or
+ * "send"), from Finder or Services, starts that step once for the newest save after the times load. */
+export function Versions({ itemId, action }: { itemId: string; action?: string | null }) {
   const now = useNow();
   const file = useItem(itemId);
   const history = useHistory(itemId);
@@ -22,6 +23,7 @@ export function Versions({ itemId }: { itemId: string }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const restoreRef = useRef<HTMLButtonElement>(null);
   const asked = useRef(false);
+  const started = useRef(false);
   const [saved, setSaved] = useState<{ folder: string; path: string } | null>(null);
 
   const summary = file.data;
@@ -42,6 +44,14 @@ export function Versions({ itemId }: { itemId: string }) {
     else if (asked.current) restoreRef.current?.focus();
     asked.current = confirming;
   }, [confirming]);
+
+  // Finder's or Services' "Save a Copy…" acts on the newest save, once. Above the early return, so
+  // the hooks run in the same order on every render; saveCopy is defined by the time it runs.
+  useEffect(() => {
+    if (started.current || action !== "save" || versions.length === 0) return;
+    started.current = true;
+    void saveCopy();
+  });
 
   const failure = history.error ?? file.error;
   const loadError = failure instanceof AppError ? failure.info : null;

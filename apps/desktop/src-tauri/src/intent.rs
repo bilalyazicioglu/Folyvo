@@ -101,6 +101,26 @@ pub fn route(intent: &Intent, item: Option<String>) -> Route {
     }
 }
 
+/// Intents that arrived before the engine was ready (Folyvo was launched by the request itself).
+#[derive(Default)]
+pub struct PendingIntent(pub std::sync::Mutex<Option<Intent>>);
+
+/// Opens the window `intent` asks for. Nothing else: no record, restore, export or delete.
+pub fn act_on(app: &tauri::AppHandle, intent: Intent) {
+    use tauri::Manager;
+    let Some(rt) = app.try_state::<std::sync::Arc<crate::runtime::AppRuntime>>() else {
+        if let Some(pending) = app.try_state::<PendingIntent>() {
+            *pending.0.lock().unwrap() = Some(intent);
+        }
+        return;
+    };
+    let item = intent.path.to_str().and_then(|p| rt.api().item_at(p).ok().flatten());
+    let _ = match route(&intent, item) {
+        Route::Versions { item, action } => crate::tray::open_versions(app, &item, action),
+        Route::Which { path } => crate::tray::show_which(app, &path),
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
