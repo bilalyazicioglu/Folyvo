@@ -275,3 +275,13 @@ test("an older copy that would run something is shown in Finder, and the button 
   expect(await screen.findByRole("button", { name: "Show a Copy in Finder" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Open a Copy/ })).not.toBeInTheDocument();
 });
+
+test("opened to save a copy, the window saves the newest once", async () => {
+  const b = backend();
+  b.state.picked = "/Users/a/Desktop";
+  renderWithClient(<Versions itemId="itm_01" action="save" />);
+  expect(await screen.findByRole("status")).toHaveTextContent("Saved a copy to Desktop");
+  expect(b.called("export").map((c) => c.args)).toEqual([{ item: "itm_01", version: "ver_03", destDir: "/Users/a/Desktop" }]);
+  await userEvent.click(await option("09:58"));
+  expect(b.called("export")).toHaveLength(1);
+});
