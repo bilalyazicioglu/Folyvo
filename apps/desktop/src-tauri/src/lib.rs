@@ -83,7 +83,10 @@ pub fn run() {
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
-                if let Some(intent) = urls.iter().find_map(|u| intent::parse_url(u.as_str())) {
+                let home = app.path().home_dir().unwrap_or_default();
+                let allowed = |i: &intent::Intent| intent::from_link_allowed(&i.path, &home);
+                if let Some(intent) = urls.iter().filter_map(|u| intent::parse_url(u.as_str())).find(allowed)
+                {
                     intent::act_on(app, intent);
                 }
             }
