@@ -100,24 +100,14 @@ pub fn default_app_name(_path: &Path) -> Option<String> {
     None
 }
 
-/// Kinds that run something when opened: apps, scripts, installers and links. A copy Folyvo writes
-/// out carries no "downloaded from the internet" mark, so macOS would run it without asking.
-const RUNS_SOMETHING: &[&str] = &[
-    "app",
-    "command",
-    "tool",
-    "terminal",
-    "sh",
-    "scpt",
-    "applescript",
-    "workflow",
-    "action",
-    "pkg",
-    "mpkg",
-    "webloc",
-    "inetloc",
-    "fileloc",
-    "jar",
+/// Kinds that are documents: opening one shows it in its app and runs nothing. A copy Folyvo writes out
+/// carries no "downloaded from the internet" mark, so any other kind (an app, a script, an installer, a
+/// link, a disk image, or a name without an extension) could run without macOS asking first.
+const DOCUMENTS: &[&str] = &[
+    "doc", "docx", "dotx", "odt", "rtf", "rtfd", "pages", "txt", "text", "md", "markdown", "csv", "tsv",
+    "json", "log", "xml", "yml", "yaml", "xls", "xlsx", "xltx", "ods", "numbers", "ppt", "pptx", "potx",
+    "odp", "key", "pdf", "png", "jpg", "jpeg", "gif", "heic", "heif", "tif", "tiff", "bmp", "webp", "svg",
+    "psd", "ai", "sketch", "fig", "mp3", "m4a", "wav", "aif", "aiff", "mp4", "m4v", "mov",
 ];
 
 /// What opening a file should do.
@@ -129,13 +119,13 @@ pub enum Opening {
     Reveal,
 }
 
-/// How to open `path`. A `copy` of a kind that runs something is shown in Finder instead of opened.
+/// How to open `path`. A `copy` is opened only when it is a document; anything else is shown in Finder.
 pub fn how_to_open(path: &Path, copy: bool) -> Opening {
-    let runs = path
+    let document = path
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| RUNS_SOMETHING.contains(&e.to_ascii_lowercase().as_str()));
-    if copy && runs {
+        .is_some_and(|e| DOCUMENTS.contains(&e.to_ascii_lowercase().as_str()));
+    if copy && !document {
         Opening::Reveal
     } else {
         Opening::Open
@@ -257,8 +247,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_kind_or_a_name_without_extension_is_shown_in_finder() {
+        for name in ["run.zsh", "x.bash", "disk.dmg", "profile.mobileconfig", "noextension", "a.zzz"] {
+            assert_eq!(how_to_open(Path::new(name), true), Opening::Reveal, "{name}");
+        }
+    }
+
+    #[test]
     fn documents_and_the_working_file_open_in_their_app() {
-        for name in ["Teklif.docx", "notlar.txt", "b.xlsx", "p.pdf", "noextension"] {
+        for name in [
+            "Teklif.docx",
+            "notlar.txt",
+            "b.xlsx",
+            "p.pdf",
+            "Sunum.key",
+            "Bütçe.numbers",
+            "foto.HEIC",
+            "kayıt.m4a",
+        ] {
             assert_eq!(how_to_open(Path::new(name), true), Opening::Open, "{name}");
         }
         // The working file keeps its own quarantine mark, so macOS still asks before running it.
