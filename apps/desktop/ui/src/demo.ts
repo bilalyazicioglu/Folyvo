@@ -71,6 +71,7 @@ export function demoHandlers() {
     copies: (a: Args) => copies.filter((c) => c.itemId === a.item),
     preview: (a: Args) => ({
       picture: a.item === "itm_demo3" ? null : PAGE,
+      text: null,
       appName: a.item === "itm_demo2" ? "Microsoft Excel" : a.item === "itm_demo3" ? null : "Microsoft Word",
     }),
     item_at: (_: Args) => null,
