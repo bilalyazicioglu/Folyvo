@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 apps/desktop/src-tauri/gen
 apps/desktop/src-tauri/target
+
+# The Finder extension, built by apps/desktop/finder/build.sh
+apps/desktop/finder/build/
