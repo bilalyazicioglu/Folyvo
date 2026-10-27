@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../api";
 import { item, mockBackend, renderWithClient, version } from "../test-utils";
@@ -212,4 +212,47 @@ test("the restore question takes focus and cancel gives it back", async () => {
   expect(cancel).toHaveFocus();
   await userEvent.click(cancel);
   expect(screen.getByRole("button", { name: "Restore" })).toHaveFocus();
+});
+
+test("older and newer step through the pile of saves", async () => {
+  backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  const newer = await screen.findByRole("button", { name: "Newer save" });
+  const older = screen.getByRole("button", { name: "Older save" });
+  expect(newer).toBeDisabled();
+  await userEvent.click(older);
+  expect(await option("09:58")).toHaveAttribute("aria-selected", "true");
+  await userEvent.click(older);
+  expect(await option("17:20")).toHaveAttribute("aria-selected", "true");
+  expect(older).toBeDisabled();
+  await userEvent.click(newer);
+  expect(await option("09:58")).toHaveAttribute("aria-selected", "true");
+});
+
+test("the arrow keys on the picture move through time", async () => {
+  backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  const pile = await screen.findByRole("group", { name: /Saved pages/ });
+  pile.focus();
+  await userEvent.keyboard("{ArrowRight}");
+  expect(await option("09:58")).toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{ArrowLeft}");
+  expect(await option("10:12")).toHaveAttribute("aria-selected", "true");
+});
+
+test("throwing the page aside shows the save before it, a nudge does not", async () => {
+  backend();
+  renderWithClient(<Versions itemId="itm_01" />);
+  const pile = await screen.findByRole("group", { name: /Saved pages/ });
+  const drag = (dx: number) => {
+    fireEvent.pointerDown(pile, { clientX: 300, clientY: 200, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(pile, { clientX: 300 + dx, clientY: 205, pointerId: 1 });
+    fireEvent.pointerUp(pile, { clientX: 300 + dx, clientY: 205, pointerId: 1 });
+  };
+  drag(40);
+  expect(await option("10:12")).toHaveAttribute("aria-selected", "true");
+  drag(180);
+  expect(await option("09:58")).toHaveAttribute("aria-selected", "true");
+  drag(-180);
+  expect(await option("10:12")).toHaveAttribute("aria-selected", "true");
 });
