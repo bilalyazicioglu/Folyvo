@@ -126,21 +126,35 @@ pub fn open_versions(app: &AppHandle, item: &str) -> tauri::Result<()> {
         .traffic_light_position(tauri::LogicalPosition::new(22.0, 28.0))
         .transparent(true);
     let window = builder.build()?;
-    sidebar_glass(&window);
+    window_glass(&window);
+    // Installing the glass lays the title bar out again and puts the window controls back in the
+    // corner; a resize makes the window apply their position once more.
+    #[cfg(target_os = "macos")]
+    {
+        let size = window.inner_size()?;
+        window.set_size(tauri::PhysicalSize::new(size.width + 1, size.height))?;
+        window.set_size(size)?;
+    }
     Ok(())
 }
 
-/// The sidebar material behind the versions window; the page paints the stage over it and lets the sidebar show.
+/// Liquid Glass behind the whole versions window; the page lays the stage over it as an opaque panel
+/// and leaves the saved times on the glass. Falls back to the sidebar material before macOS 26.
 #[cfg(target_os = "macos")]
-fn sidebar_glass(window: &tauri::WebviewWindow) {
-    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
-    let _ = apply_vibrancy(
-        window,
-        NSVisualEffectMaterial::Sidebar,
-        Some(NSVisualEffectState::FollowsWindowActiveState),
-        None,
-    );
+fn window_glass(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{
+        apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle,
+        NSVisualEffectMaterial, NSVisualEffectState,
+    };
+    if apply_liquid_glass(window, LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular)).is_err() {
+        let _ = apply_vibrancy(
+            window,
+            NSVisualEffectMaterial::Sidebar,
+            Some(NSVisualEffectState::FollowsWindowActiveState),
+            None,
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn sidebar_glass(_window: &tauri::WebviewWindow) {}
+fn window_glass(_window: &tauri::WebviewWindow) {}
