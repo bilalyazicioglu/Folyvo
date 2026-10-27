@@ -40,14 +40,21 @@ type Dir = 1 | -1;
 export function Stage({ name, kind, when, meta, preview, failed, older, newer, onOlder, onNewer }: Props) {
   const [dx, setDx] = useState(0);
   const from = useRef<number | null>(null);
-  const [thrown, setThrown] = useState<{ src: string; dx: number; key: number; gone: boolean } | null>(null);
+  const [thrown, setThrown] = useState<{
+    src: string | null;
+    text: string | null;
+    dx: number;
+    key: number;
+    gone: boolean;
+  } | null>(null);
   const [arriving, setArriving] = useState(false);
   const cameBack = useRef(false);
   const picture = preview?.picture ?? null;
 
   const go = (dir: Dir, at = 0) => {
     if (dir === 1 ? older === 0 : newer === 0) return;
-    if (dir === 1 && picture) setThrown({ src: picture, dx: at, key: Date.now(), gone: false });
+    const text = preview?.text ?? null;
+    if (dir === 1 && (picture || text)) setThrown({ src: picture, text, dx: at, key: Date.now(), gone: false });
     cameBack.current = dir === -1;
     if (dir === 1) onOlder();
     else onNewer();
@@ -77,7 +84,10 @@ export function Stage({ name, kind, when, meta, preview, failed, older, newer, o
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const move = (e: PointerEvent) => {
-    if (from.current !== null) setDx(e.clientX - from.current);
+    if (from.current === null) return;
+    const pulled = e.clientX - from.current;
+    const blocked = pulled > 0 ? older === 0 : newer === 0;
+    setDx(blocked ? pulled / 6 : pulled);
   };
   const up = (e: PointerEvent) => {
     if (from.current === null) return;
@@ -131,7 +141,11 @@ export function Stage({ name, kind, when, meta, preview, failed, older, newer, o
             <div key={i} className={`stage__page stage__page--${i + 1}`} aria-hidden="true" />
           ))}
           <div className="stage__top" style={top}>
-            {picture ? (
+            {preview?.text ? (
+              <div className="stage__paper" role="img" aria-label={`Picture of ${name} as it was ${when}`}>
+                <pre aria-hidden="true">{preview.text}</pre>
+              </div>
+            ) : picture ? (
               <img
                 className="stage__picture"
                 src={picture}
@@ -148,14 +162,20 @@ export function Stage({ name, kind, when, meta, preview, failed, older, newer, o
             )}
           </div>
           {thrown && (
-            <img
+            <div
               key={thrown.key}
-              className={`stage__picture stage__thrown${thrown.gone ? " is-gone" : ""}`}
-              src={thrown.src}
-              alt=""
+              className={`stage__thrown${thrown.gone ? " is-gone" : ""}`}
               aria-hidden="true"
               style={{ "--from": `${thrown.dx}px`, "--turn": `${thrown.dx / 24}deg` } as CSSProperties}
-            />
+            >
+              {thrown.text !== null ? (
+                <div className="stage__paper">
+                  <pre>{thrown.text}</pre>
+                </div>
+              ) : (
+                <img className="stage__picture" src={thrown.src ?? undefined} alt="" />
+              )}
+            </div>
           )}
         </div>
         <button
