@@ -56,14 +56,23 @@ pub fn parse_url(url: &str) -> Option<Intent> {
             _ => {}
         }
     }
-    let path = path.filter(|p| p.is_absolute() && !elsewhere(p))?;
+    let path = path.filter(|p| p.is_absolute())?;
     Some(Intent { kind: kind?, path })
 }
 
-/// A network share or another disk. Decided from the path alone: looking at such a path, even to ask
-/// whether it exists, can make macOS connect to the server a link names.
-fn elsewhere(path: &std::path::Path) -> bool {
-    ["/net", "/Network", "/Volumes"].iter().any(|root| path.starts_with(root))
+/// Whether a link may name `path`: a file inside `home`, written without `.` or `..`. Decided from the
+/// text alone, because any web page can open a link, and looking at a path (even to ask whether it
+/// exists) can make macOS connect to a network share it names. The comparison ignores case, as the
+/// Mac's disk does.
+pub fn from_link_allowed(path: &std::path::Path, home: &std::path::Path) -> bool {
+    use std::path::Component;
+    let plain =
+        |p: &std::path::Path| p.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+    if !plain(path) || !plain(home) {
+        return false;
+    }
+    let (path, home) = (path.to_string_lossy().to_lowercase(), home.to_string_lossy().to_lowercase());
+    path.strip_prefix(home.trim_end_matches('/')).is_some_and(|rest| rest.len() > 1 && rest.starts_with('/'))
 }
 
 /// Percent-decoding as UTF-8. `+` stays a plus: Finder encodes spaces as `%20`.
@@ -130,7 +139,7 @@ pub fn act_on(app: &tauri::AppHandle, intent: Intent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn a_finder_url_names_the_kind_and_the_first_path() {
@@ -162,17 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn a_url_never_reaches_a_network_share_or_another_disk() {
-        // Any web page can open these; touching /net or a share would make macOS connect to it.
-        for path in [
-            "%2Fnet%2Fhost%2Fshare%2Fx.docx",
-            "%2FNetwork%2FServers%2Fx",
-            "%2FVolumes%2FUSB%2Fx.docx",
-            "%2Fnet",
-        ] {
-            assert_eq!(parse_url(&format!("folyvo://intent?kind=which_one&path={path}")), None, "{path}");
+    fn a_link_may_only_name_a_file_in_the_home_folder() {
+        let home = Path::new("/Users/a");
+        for ok in ["/Users/a/Desktop/Teklif.docx", "/USERS/A/Library/Mobile Documents/x.txt", "/Users/a/x"] {
+            assert!(from_link_allowed(Path::new(ok), home), "{ok}");
         }
-        assert!(parse_url("folyvo://intent?kind=which_one&path=%2FUsers%2Fa%2Fnetwork%2Fx.docx").is_some());
+        for no in [
+            "/net/host/share/x.docx", // makes macOS connect to the host
+            "/Network/Servers/x",
+            "/Volumes/USB/x.docx",       // another disk
+            "/Users/a/../../net/host/x", // climbs out of home
+            "/Users/a/./../b/x",
+            "/Users/ab/x", // another folder that only starts the same
+            "/Users/b/x",
+            "/tmp/x",
+            "/Users/a", // home itself is not a file
+        ] {
+            assert!(!from_link_allowed(Path::new(no), home), "{no}");
+        }
     }
 
     #[test]
