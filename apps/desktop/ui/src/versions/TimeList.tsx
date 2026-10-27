@@ -53,6 +53,7 @@ export function TimeList({ versions, copies, selected, now, onSelect }: Props) {
                 aria-selected={v.id === selected}
                 tabIndex={v.id === selected ? 0 : -1}
                 className="times__row"
+                data-copied={left.length > 0}
                 onClick={() => onSelect(v.id)}
               >
                 <span className="times__rail" aria-hidden="true" />

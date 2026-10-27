@@ -91,13 +91,13 @@ fn glass(window: &tauri::WebviewWindow) {
         apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle,
         NSVisualEffectMaterial, NSVisualEffectState,
     };
-    let liquid = LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(18.0);
+    let liquid = LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(24.0);
     if apply_liquid_glass(window, liquid).is_err() {
         let _ = apply_vibrancy(
             window,
             NSVisualEffectMaterial::Popover,
             Some(NSVisualEffectState::Active),
-            Some(18.0),
+            Some(24.0),
         );
     }
 }
@@ -114,10 +114,33 @@ pub fn open_versions(app: &AppHandle, item: &str) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, "versions", WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(app, "versions", WebviewUrl::App(url.into()))
         .title("Versions")
         .inner_size(1100.0, 760.0)
-        .min_inner_size(760.0, 520.0)
-        .build()?;
+        .min_inner_size(760.0, 520.0);
+    // The window controls sit on the page, and the sidebar is see-through to the system material.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(22.0, 28.0))
+        .transparent(true);
+    let window = builder.build()?;
+    sidebar_glass(&window);
     Ok(())
 }
+
+/// The sidebar material behind the versions window; the page paints the stage over it and lets the sidebar show.
+#[cfg(target_os = "macos")]
+fn sidebar_glass(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+    let _ = apply_vibrancy(
+        window,
+        NSVisualEffectMaterial::Sidebar,
+        Some(NSVisualEffectState::FollowsWindowActiveState),
+        None,
+    );
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sidebar_glass(_window: &tauri::WebviewWindow) {}
