@@ -28,7 +28,6 @@ impl Archive {
         Ok(Archive { zip })
     }
 
-    #[allow(dead_code)] // the Word reader lists header and footer parts with it (next task)
     pub(crate) fn names(&self) -> Vec<String> {
         self.zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect()
     }

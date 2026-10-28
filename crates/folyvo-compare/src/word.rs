@@ -13,7 +13,26 @@ pub(crate) fn read_word(archive: &mut Archive, budget: &mut Budget) -> Reading {
 
 fn read_parts(archive: &mut Archive, budget: &mut Budget) -> Result<Vec<Block>, Unreadable> {
     let body = archive.read_part("word/document.xml", budget)?.ok_or(Unreadable::Malformed)?;
-    blocks_of(&body, Section::Body, budget)
+    let mut blocks = blocks_of(&body, Section::Body, budget)?;
+    let mut names = archive.names();
+    names.sort();
+    let numbered = |name: &str, kind: &str| {
+        name.strip_prefix("word/")
+            .and_then(|n| n.strip_prefix(kind))
+            .and_then(|n| n.strip_suffix(".xml"))
+            .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+    };
+    let mut parts: Vec<(String, Section)> = Vec::new();
+    parts.extend(names.iter().filter(|n| numbered(n, "header")).map(|n| (n.clone(), Section::Header)));
+    parts.extend(names.iter().filter(|n| numbered(n, "footer")).map(|n| (n.clone(), Section::Footer)));
+    parts.push(("word/footnotes.xml".into(), Section::Notes));
+    parts.push(("word/endnotes.xml".into(), Section::Notes));
+    for (name, section) in parts {
+        if let Some(xml) = archive.read_part(&name, budget)? {
+            blocks.extend(blocks_of(&xml, section, budget)?);
+        }
+    }
+    Ok(blocks)
 }
 
 /// A paragraph being read, with any text-box paragraphs found inside it.
@@ -41,7 +60,25 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
     let mut path: Vec<String> = Vec::new();
     let mut paras: Vec<Para> = Vec::new();
     let mut tables: Vec<Table> = Vec::new();
+    // Inside a footnote or endnote that only draws the line above the notes, nothing is read.
+    let mut skipping: Option<usize> = None;
     while let Some(ev) = reader.next(budget)? {
+        if let Some(depth) = skipping {
+            match &ev {
+                Ev::Start(..) => skipping = Some(depth + 1),
+                Ev::End(_) if depth == 0 => skipping = None,
+                Ev::End(_) => skipping = Some(depth - 1),
+                _ => {}
+            }
+            continue;
+        }
+        if let Ev::Start(n, a) = &ev {
+            let separator = matches!(attr(a, "type"), Some("separator" | "continuationSeparator"));
+            if separator && (n == "footnote" || n == "endnote") {
+                skipping = Some(0);
+                continue;
+            }
+        }
         let (name, attrs, opens) = match &ev {
             Ev::Start(n, a) => (n.as_str(), a.as_slice(), true),
             Ev::Empty(n, a) => (n.as_str(), a.as_slice(), false),
@@ -316,5 +353,96 @@ mod tests {
             read_with(&docx(d.path(), &body, &[]), "a.docx", &limits),
             Reading::Unreadable(Unreadable::TooSlow)
         );
+    }
+
+    fn part(root: &str, inner: &str) -> String {
+        format!(
+            r#"<w:{root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">{inner}</w:{root}>"#
+        )
+    }
+
+    #[test]
+    fn headers_footers_and_notes_follow_the_body() {
+        let d = tempfile::tempdir().unwrap();
+        let notes = part(
+            "footnotes",
+            &format!(
+                "<w:footnote w:type=\"separator\" w:id=\"-1\">{}</w:footnote><w:footnote w:id=\"1\">{}</w:footnote>",
+                wp("----"),
+                wp("N")
+            ),
+        );
+        let path = docx(
+            d.path(),
+            &wp("B"),
+            &[
+                ("word/footer1.xml", &part("ftr", &wp("F"))),
+                ("word/header1.xml", &part("hdr", &wp("H"))),
+                ("word/footnotes.xml", &notes),
+            ],
+        );
+        let at =
+            |section, text: &str| Block::Paragraph { section, style: ParaStyle::Body, text: text.into() };
+        assert_eq!(
+            read(&path, "doc.docx"),
+            Reading::Text {
+                unit: Unit::Paragraph,
+                blocks: vec![
+                    at(Section::Body, "B"),
+                    at(Section::Header, "H"),
+                    at(Section::Footer, "F"),
+                    at(Section::Notes, "N")
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn a_dtd_is_malformed() {
+        let d = tempfile::tempdir().unwrap();
+        let xml = b"<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY a \"aaaa\">]><w:document><w:body><w:p><w:r><w:t>&a;</w:t></w:r></w:p></w:body></w:document>";
+        let path = crate::testkit::zip_file(d.path(), "a.docx", &[("word/document.xml", xml)]);
+        assert_eq!(read(&path, "a.docx"), Reading::Unreadable(Unreadable::Malformed));
+    }
+
+    #[test]
+    fn billion_laughs_is_malformed() {
+        let d = tempfile::tempdir().unwrap();
+        let mut dtd = String::from("<!ENTITY l0 \"ha\">");
+        for i in 1..10 {
+            let prev = format!("&l{};", i - 1).repeat(10);
+            dtd.push_str(&format!("<!ENTITY l{i} \"{prev}\">"));
+        }
+        let xml = format!("<!DOCTYPE d [{dtd}]><w:document><w:body><w:p><w:r><w:t>&l9;</w:t></w:r></w:p></w:body></w:document>");
+        let path = crate::testkit::zip_file(d.path(), "a.docx", &[("word/document.xml", xml.as_bytes())]);
+        assert_eq!(read(&path, "a.docx"), Reading::Unreadable(Unreadable::Malformed));
+    }
+
+    #[test]
+    fn an_undeclared_entity_is_malformed() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(
+            read(&docx(d.path(), &wp("&nbsp;"), &[]), "a.docx"),
+            Reading::Unreadable(Unreadable::Malformed)
+        );
+    }
+
+    #[test]
+    fn deep_nesting_does_not_overflow() {
+        let d = tempfile::tempdir().unwrap();
+        let depth = 100_000;
+        let body = format!(
+            "{}{}{}",
+            "<w:tbl><w:tr><w:tc>".repeat(depth),
+            wp("x"),
+            "</w:tc></w:tr></w:tbl>".repeat(depth)
+        );
+        let got = read(&docx(d.path(), &body, &[]), "a.docx");
+        assert!(matches!(got, Reading::Text { .. } | Reading::Unreadable(_)));
+    }
+
+    #[test]
+    fn standard_entities_are_kept() {
+        assert_eq!(blocks(&wp("A &amp; B &lt;3 &#x20AC;")), vec![body("A & B <3 €")]);
     }
 }
