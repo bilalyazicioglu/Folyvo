@@ -8,6 +8,8 @@ mod sniff;
 #[cfg(test)]
 mod testkit;
 mod text;
+mod word;
+mod xml;
 
 use std::path::Path;
 
@@ -42,7 +44,11 @@ pub fn read_with(path: &Path, name_hint: &str, limits: &Limits) -> Reading {
             Ok(bytes) => text::read_text(&bytes, unit, &mut budget),
             Err(_) => Reading::Unreadable(Unreadable::Malformed),
         },
-        Kind::Word | Kind::Excel | Kind::Pdf | Kind::Other => Reading::Unreadable(Unreadable::NotSupported),
+        Kind::Word => match archive::Archive::open(path, limits) {
+            Ok(mut zip) => word::read_word(&mut zip, &mut budget),
+            Err(why) => Reading::Unreadable(why),
+        },
+        Kind::Excel | Kind::Pdf | Kind::Other => Reading::Unreadable(Unreadable::NotSupported),
     }
 }
 

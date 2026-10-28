@@ -40,7 +40,6 @@ impl Archive {
     /// The bytes of `name`, or `None` when the zip has no such part. Stored and deflated parts
     /// only. The declared size and ratio are checked first, and reading stops one byte past the
     /// limit, so a header that lies about the size still cannot make it read more.
-    #[allow(dead_code)] // the Word and Excel readers use it (next tasks)
     pub(crate) fn read_part(
         &mut self,
         name: &str,
