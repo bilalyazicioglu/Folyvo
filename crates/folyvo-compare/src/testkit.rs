@@ -51,7 +51,9 @@ const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 /// A Word file whose body is `body_xml`, plus any other parts given whole.
 pub(crate) fn docx(dir: &Path, body_xml: &str, extra: &[(&str, &str)]) -> PathBuf {
-    let document = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{W}"><w:body>{body_xml}</w:body></w:document>"#);
+    let document = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{W}"><w:body>{body_xml}</w:body></w:document>"#
+    );
     let mut parts: Vec<(&str, &[u8])> = vec![("word/document.xml", document.as_bytes())];
     parts.extend(extra.iter().map(|(n, x)| (*n, x.as_bytes())));
     zip_file(dir, "doc.docx", &parts)
