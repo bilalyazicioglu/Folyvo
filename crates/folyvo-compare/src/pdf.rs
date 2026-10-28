@@ -2,12 +2,18 @@
 
 use crate::{Budget, Limits, Reading};
 
-/// The pages' text as a reading, whitespace squashed to single spaces, within the text limit.
+/// The pages' text as a reading, within the text limit. Each page keeps its lines, so headings
+/// stay on their own; spaces inside a line are squashed to one and empty lines are dropped.
 pub fn pdf_reading(pages: Vec<String>, limits: &Limits) -> Reading {
     let mut budget = Budget::new(limits);
     let mut out = Vec::with_capacity(pages.len());
     for page in pages {
-        let squashed = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        let squashed = page
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
         if let Err(why) = budget.add_text(squashed.len()) {
             return Reading::Unreadable(why);
         }
@@ -37,8 +43,11 @@ mod tests {
     }
 
     #[test]
-    fn page_text_is_squashed_to_single_spaces() {
-        assert_eq!(pages(&["  Total\n\n€10,200 \t net "]), Reading::Pages(vec!["Total €10,200 net".into()]));
+    fn a_page_keeps_its_lines_with_spaces_tidied() {
+        assert_eq!(
+            pages(&["  Summary \r\n\n  Total   €10,200 \t net \n"]),
+            Reading::Pages(vec!["Summary\nTotal €10,200 net".into()])
+        );
     }
 
     #[test]
