@@ -1,7 +1,7 @@
 //! Zips (Word and Excel files), opened within the limits.
 
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use zip::result::ZipError;
@@ -15,7 +15,12 @@ pub(crate) struct Archive {
 
 impl Archive {
     pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Archive, Unreadable> {
-        let file = File::open(path).map_err(|_| Unreadable::Malformed)?;
+        let mut file = File::open(path).map_err(|_| Unreadable::Malformed)?;
+        let (entries, directory_bytes) = directory_size(&mut file).ok_or(Unreadable::Malformed)?;
+        if entries > limits.zip_entries as u64 || directory_bytes > limits.zip_entries as u64 * ENTRY_BYTES {
+            return Err(Unreadable::TooLarge);
+        }
+        file.rewind().map_err(|_| Unreadable::Malformed)?;
         let zip = ZipArchive::new(file).map_err(|_| Unreadable::Malformed)?;
         if zip.len() > limits.zip_entries {
             return Err(Unreadable::TooLarge);
@@ -65,6 +70,40 @@ impl Archive {
     }
 }
 
+/// The most central-directory bytes allowed per entry: the fixed 46 plus a generous name and extras.
+const ENTRY_BYTES: u64 = 1024;
+
+/// The entry count and central-directory size the zip's end record declares (zip64 too), read
+/// before the directory itself so a forged count cannot make the zip library parse it all.
+fn directory_size(file: &mut File) -> Option<(u64, u64)> {
+    let len = file.metadata().ok()?.len();
+    let tail_len = len.min(22 + u64::from(u16::MAX));
+    file.seek(SeekFrom::Start(len - tail_len)).ok()?;
+    let mut tail = vec![0; tail_len as usize];
+    file.read_exact(&mut tail).ok()?;
+    let end = tail.windows(4).rposition(|w| w == b"PK\x05\x06")?;
+    let record = tail.get(end..end + 22)?;
+    let u16_at = |b: &[u8], i: usize| u64::from(u16::from_le_bytes([b[i], b[i + 1]]));
+    let u32_at = |b: &[u8], i: usize| u64::from(u32::from_le_bytes(b[i..i + 4].try_into().unwrap()));
+    let u64_at = |b: &[u8], i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    let (entries, size) = (u16_at(record, 10), u32_at(record, 12));
+    if entries != 0xFFFF && size != 0xFFFF_FFFF {
+        return Some((entries, size));
+    }
+    // A zip64 file: its locator sits right before the end record and points at the zip64 end record.
+    let locator = tail.get(end.checked_sub(20)?..end)?;
+    if !locator.starts_with(b"PK\x06\x07") {
+        return None;
+    }
+    file.seek(SeekFrom::Start(u64_at(locator, 8))).ok()?;
+    let mut record = [0u8; 56];
+    file.read_exact(&mut record).ok()?;
+    if !record.starts_with(b"PK\x06\x06") {
+        return None;
+    }
+    Some((u64_at(&record, 32), u64_at(&record, 40)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +130,14 @@ mod tests {
         let z = zip_file(d.path(), "a.zip", &[("a", b"1"), ("b", b"2"), ("c", b"3")]);
         let limits = Limits { zip_entries: 2, ..Limits::DEFAULT };
         assert_eq!(Archive::open(&z, &limits).err(), Some(Unreadable::TooLarge));
+    }
+
+    #[test]
+    fn a_directory_claiming_too_many_entries_is_refused_before_it_is_read() {
+        let d = tempfile::tempdir().unwrap();
+        let z = zip_file(d.path(), "a.zip", &[("a", b"1")]);
+        crate::testkit::patch_entry_count(&z, 60_000);
+        assert_eq!(Archive::open(&z, &Limits::DEFAULT).err(), Some(Unreadable::TooLarge));
     }
 
     #[test]

@@ -46,3 +46,27 @@ pub(crate) fn patch_first_entry(path: &Path, method: Option<u16>, size: Option<u
 fn find(hay: &[u8], needle: &[u8]) -> usize {
     hay.windows(needle.len()).position(|w| w == needle).unwrap()
 }
+
+const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+/// A Word file whose body is `body_xml`, plus any other parts given whole.
+pub(crate) fn docx(dir: &Path, body_xml: &str, extra: &[(&str, &str)]) -> PathBuf {
+    let document = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{W}"><w:body>{body_xml}</w:body></w:document>"#);
+    let mut parts: Vec<(&str, &[u8])> = vec![("word/document.xml", document.as_bytes())];
+    parts.extend(extra.iter().map(|(n, x)| (*n, x.as_bytes())));
+    zip_file(dir, "doc.docx", &parts)
+}
+
+/// `<w:p>` with one run of `text`.
+pub(crate) fn wp(text: &str) -> String {
+    format!("<w:p><w:r><w:t xml:space=\"preserve\">{text}</w:t></w:r></w:p>")
+}
+
+/// Overwrites the entry counts in the end-of-central-directory record.
+pub(crate) fn patch_entry_count(path: &Path, count: u16) {
+    let mut bytes = std::fs::read(path).unwrap();
+    let end = bytes.windows(4).rposition(|w| w == b"PK\x05\x06").unwrap();
+    bytes[end + 8..end + 10].copy_from_slice(&count.to_le_bytes());
+    bytes[end + 10..end + 12].copy_from_slice(&count.to_le_bytes());
+    std::fs::write(path, bytes).unwrap();
+}
