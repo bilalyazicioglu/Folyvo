@@ -2,6 +2,8 @@
 //! platform code, no knowledge of the vault: it is handed two files and gives back what it found.
 
 mod archive;
+mod compare;
+
 mod budget;
 mod reading;
 mod sniff;
@@ -15,6 +17,7 @@ use std::path::Path;
 
 pub(crate) use budget::Budget;
 pub use budget::Limits;
+pub use compare::{compare, Changes, Count, Mark, Marked, MarkedBlock, MarkedCell, Outcome, Span};
 pub use reading::{Block, CellRef, ParaStyle, Reading, Section, Sheet, Unit, Unreadable};
 use sniff::Kind;
 
