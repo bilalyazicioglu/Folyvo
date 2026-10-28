@@ -90,7 +90,7 @@ jobs:
       - if: steps.detect.outputs.rust == 'true'
         uses: ./.github/actions/setup-rust
       - if: steps.detect.outputs.rust == 'true'
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
         with:
           tool: cargo-nextest
       - if: steps.detect.outputs.rust == 'true'
@@ -110,7 +110,7 @@ jobs:
         run: |
           if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; else echo "rust=false" >> "$GITHUB_OUTPUT"; fi
       - if: steps.detect.outputs.rust == 'true'
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
         with:
           tool: cargo-deny
       - if: steps.detect.outputs.rust == 'true'
