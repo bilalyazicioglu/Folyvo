@@ -13,6 +13,13 @@ pub type Summarise = Arc<dyn Fn(&CompareInputs) -> ChangeRecord + Send + Sync>;
 
 /// What a file says, by its content and its name.
 pub(crate) fn reading_of(path: &std::path::Path, name: &str) -> Reading {
+    if folyvo_compare::is_pdf(path) {
+        let limits = folyvo_compare::Limits::DEFAULT;
+        return match crate::pdf::page_texts(path, &limits) {
+            Ok(pages) => folyvo_compare::pdf_reading(pages, &limits),
+            Err(why) => Reading::Unreadable(why),
+        };
+    }
     folyvo_compare::read(path, name)
 }
 
