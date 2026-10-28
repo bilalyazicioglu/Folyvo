@@ -60,7 +60,7 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
     let mut path: Vec<String> = Vec::new();
     let mut paras: Vec<Para> = Vec::new();
     let mut tables: Vec<Table> = Vec::new();
-    // Inside a footnote or endnote that only draws the line above the notes, nothing is read.
+    // Inside a part that is `skipped`, nothing is read.
     let mut skipping: Option<usize> = None;
     while let Some(ev) = reader.next(budget)? {
         if let Some(depth) = skipping {
@@ -73,8 +73,7 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
             continue;
         }
         if let Ev::Start(n, a) = &ev {
-            let separator = matches!(attr(a, "type"), Some("separator" | "continuationSeparator"));
-            if separator && (n == "footnote" || n == "endnote") {
+            if skipped(n, a) {
                 skipping = Some(0);
                 continue;
             }
@@ -153,6 +152,17 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
         }
     }
     Ok(out)
+}
+
+/// Parts of a document whose text is not in it as it reads now: the line drawn above the notes,
+/// the older copy of a text box Word keeps for old readers (`mc:Fallback`), and text a tracked
+/// change deleted or moved away.
+fn skipped(name: &str, attrs: &[(String, String)]) -> bool {
+    match name {
+        "footnote" | "endnote" => matches!(attr(attrs, "type"), Some("separator" | "continuationSeparator")),
+        "Fallback" | "moveFrom" | "del" => true,
+        _ => false,
+    }
 }
 
 fn push_text(paras: &mut [Para], s: &str) {
@@ -468,6 +478,28 @@ mod tests {
             read_with(&docx(d.path(), body, &[]), "a.docx", &limits),
             Reading::Unreadable(Unreadable::TooLarge)
         );
+    }
+
+    #[test]
+    fn a_text_box_word_writes_twice_is_read_once() {
+        let got = blocks(&format!(
+            "<w:p><w:r><w:t>A</w:t></w:r><w:r><mc:AlternateContent>\
+             <mc:Choice Requires=\"wps\"><w:drawing><wps:txbx><w:txbxContent>{b}</w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+             <mc:Fallback><w:pict><v:textbox><w:txbxContent>{b}</w:txbxContent></v:textbox></w:pict></mc:Fallback>\
+             </mc:AlternateContent></w:r></w:p>",
+            b = wp("B")
+        ));
+        assert_eq!(got, vec![body("A"), body("B")]);
+    }
+
+    #[test]
+    fn tracked_moves_and_deletions_read_as_accepted() {
+        let got = blocks(
+            "<w:moveFrom w:id=\"1\"><w:p><w:r><w:t>One</w:t></w:r></w:p></w:moveFrom>\
+             <w:p><w:r><w:t>Two</w:t></w:r><w:del w:id=\"3\"><w:r><w:t>gone</w:t></w:r></w:del></w:p>\
+             <w:moveTo w:id=\"2\"><w:p><w:r><w:t>One</w:t></w:r></w:p></w:moveTo>",
+        );
+        assert_eq!(got, vec![body("Two"), body("One")]);
     }
 
     #[test]
