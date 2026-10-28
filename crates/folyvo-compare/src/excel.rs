@@ -143,11 +143,24 @@ fn sheet_cells(
     let mut cells = BTreeMap::new();
     let mut cell: Option<Cell> = None;
     let mut reading = false; // inside `<v>`, or the `<t>` of an inline string
+                             // Where the next cell goes when it does not say: `r` is optional on rows and cells.
+    let (mut row, mut col) = (0u32, 0u32);
     while let Some(ev) = reader.next(budget)? {
         match ev {
-            Ev::Start(name, attrs) if name == "c" => {
+            Ev::Start(name, attrs) | Ev::Empty(name, attrs) if name == "row" => {
+                row = attr(&attrs, "r").and_then(|r| r.parse().ok()).unwrap_or(row + 1);
+                col = 0;
+            }
+            Ev::Start(name, attrs) | Ev::Empty(name, attrs) if name == "c" => {
+                let at = match attr(&attrs, "r") {
+                    Some(r) => CellRef::parse(r),
+                    None => Some(CellRef { row: row.max(1), col: col + 1 }),
+                };
+                if let Some(at) = at {
+                    (row, col) = (at.row, at.col);
+                }
                 cell = Some(Cell {
-                    at: attr(&attrs, "r").and_then(CellRef::parse),
+                    at,
                     kind: attr(&attrs, "t").unwrap_or("n").to_string(),
                     style: attr(&attrs, "s").and_then(|s| s.parse().ok()).unwrap_or(0),
                     value: String::new(),
@@ -285,6 +298,16 @@ mod tests {
         let s = sheets_of(&xlsx(d.path(), &[("S", "sheet1.xml", data)], &[], Some(DATE_STYLES)));
         assert_eq!(at(&s[0], "A1").as_deref(), Some("2026-10-21"));
         assert_eq!(at(&s[0], "B1").as_deref(), Some("46316"));
+    }
+
+    #[test]
+    fn cells_without_an_address_take_their_place_in_the_row() {
+        let d = tempfile::tempdir().unwrap();
+        let data = r#"<row><c><v>1</v></c><c><v>2</v></c></row><row r="4"><c><v>3</v></c><c r="C4"><v>4</v></c><c><v>5</v></c></row>"#;
+        let s = sheets_of(&xlsx(d.path(), &[("S", "sheet1.xml", data)], &[], None));
+        for (a1, v) in [("A1", "1"), ("B1", "2"), ("A4", "3"), ("C4", "4"), ("D4", "5")] {
+            assert_eq!(at(&s[0], a1).as_deref(), Some(v), "{a1}");
+        }
     }
 
     #[test]
