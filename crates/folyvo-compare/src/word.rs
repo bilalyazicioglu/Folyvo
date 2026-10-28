@@ -83,6 +83,10 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
                     skipping = Some(0);
                     continue;
                 }
+                "Choice" if !understood(attr(a, "Requires").unwrap_or("")) => {
+                    skipping = Some(0);
+                    continue;
+                }
                 "Choice" => {
                     if let Some(read) = alternatives.last_mut() {
                         *read = true;
@@ -174,6 +178,17 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
         }
     }
     Ok(out)
+}
+
+/// The markup Word itself draws, by the prefixes Word writes for it. A choice that needs anything
+/// else is one Word skips for the next choice or the fallback, and so does Folyvo.
+const UNDERSTOOD: &[&str] = &[
+    "w", "w14", "w15", "w16", "w16se", "w16cid", "w16cex", "w16du", "w16sdtdh", "wp", "wp14", "wps", "wpg",
+    "wpc", "wpi", "wne", "a", "a14", "pic", "v", "o", "m", "r", "mc",
+];
+
+fn understood(requires: &str) -> bool {
+    requires.split_whitespace().all(|prefix| UNDERSTOOD.contains(&prefix))
 }
 
 /// Parts of a document whose text is not in it as it reads now: the line drawn above the notes,
@@ -520,6 +535,27 @@ mod tests {
             wp("hidden?")
         ));
         assert_eq!(got, vec![body("hidden?")]);
+    }
+
+    #[test]
+    fn a_choice_word_would_not_understand_gives_way_to_the_fallback() {
+        let got = blocks(&format!(
+            "<w:p><w:r><mc:AlternateContent>\
+             <mc:Choice Requires=\"x9\"><w:txbxContent>{}</w:txbxContent></mc:Choice>\
+             <mc:Choice Requires=\"wps w14\"><w:txbxContent>{}</w:txbxContent></mc:Choice>\
+             <mc:Fallback><w:txbxContent>{}</w:txbxContent></mc:Fallback>\
+             </mc:AlternateContent></w:r></w:p>",
+            wp("not drawn"),
+            wp("drawn"),
+            wp("old copy")
+        ));
+        assert_eq!(got, vec![body("drawn")]);
+        let got = blocks(&format!(
+            "<w:p><w:r><mc:AlternateContent><mc:Choice Requires=\"x9\">{}</mc:Choice><mc:Fallback>{}</mc:Fallback></mc:AlternateContent></w:r></w:p>",
+            wp("not drawn"),
+            wp("what Word shows")
+        ));
+        assert_eq!(got, vec![body("what Word shows")]);
     }
 
     #[test]
