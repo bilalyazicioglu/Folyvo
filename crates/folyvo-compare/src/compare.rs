@@ -55,7 +55,16 @@ pub enum MarkedBlock {
 pub enum Marked {
     Text(Vec<MarkedBlock>),
     Sheets(Vec<SheetChanges>),
+    Pages(Vec<PageChanges>),
     Nothing,
+}
+
+/// One page of a PDF, numbered from 1, with its words marked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageChanges {
+    pub number: u32,
+    pub mark: Mark,
+    pub spans: Vec<Span>,
 }
 
 /// A sheet, matched by name. An added or removed sheet lists no cells.
@@ -108,6 +117,7 @@ pub(crate) fn compare_until(before: &Reading, after: &Reading, deadline: Instant
             compare_text(*a, old, new, deadline)
         }
         (Reading::Sheets(old), Reading::Sheets(new)) => compare_sheets(old, new),
+        (Reading::Pages(old), Reading::Pages(new)) => compare_pages(old, new, deadline),
         _ => Changes { outcome: Outcome::Unknown, counts: Vec::new(), marked: Marked::Nothing },
     }
 }
@@ -182,6 +192,35 @@ fn compare_text(unit: Unit, old: &[Block], new: &[Block], deadline: Instant) -> 
     let counts = tally.finish();
     let outcome = if counts.is_empty() { Outcome::SameText } else { Outcome::Text };
     Changes { outcome, counts, marked: Marked::Text(marked) }
+}
+
+/// Pages by number: a page in both whose words differ is changed, extra pages are added or removed.
+fn compare_pages(old: &[String], new: &[String], deadline: Instant) -> Changes {
+    let mut tally = Tally::default();
+    let mut marked = Vec::new();
+    for at in 0..old.len().max(new.len()) {
+        let number = at as u32 + 1;
+        let (mark, spans) = match (old.get(at), new.get(at)) {
+            (Some(a), Some(b)) if a == b => (Mark::Same, vec![Span::Same(b.clone())]),
+            (Some(a), Some(b)) => {
+                tally.change(Unit::Page, 1);
+                (Mark::Changed, words(a, b, deadline))
+            }
+            (None, Some(b)) => {
+                tally.add(Unit::Page, 1);
+                (Mark::Added, vec![Span::Added(b.clone())])
+            }
+            (Some(a), None) => {
+                tally.remove(Unit::Page, 1);
+                (Mark::Removed, vec![Span::Removed(a.clone())])
+            }
+            (None, None) => continue,
+        };
+        marked.push(PageChanges { number, mark, spans });
+    }
+    let counts = tally.finish();
+    let outcome = if counts.is_empty() { Outcome::SameText } else { Outcome::Text };
+    Changes { outcome, counts, marked: Marked::Pages(marked) }
 }
 
 /// Sheets by name, in the later file's order, with removed sheets after them.

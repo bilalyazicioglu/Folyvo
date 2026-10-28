@@ -387,6 +387,9 @@ pub enum MarkedPageDto {
     Sheets {
         sheets: Vec<SheetChangesDto>,
     },
+    Pages {
+        pages: Vec<PageChangesDto>,
+    },
     /// Folyvo cannot read this kind of file, or this one.
     Unreadable,
     /// The save before has the very same content.
@@ -462,6 +465,16 @@ pub struct SheetChangesDto {
     pub name: String,
     pub mark: MarkDto,
     pub cells: Vec<CellChangeDto>,
+}
+
+/// One PDF page, numbered from 1.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PageChangesDto {
+    pub number: u32,
+    pub mark: MarkDto,
+    pub spans: Vec<SpanDto>,
 }
 
 /// A cell that differs: `at` is its address ("B7").
@@ -560,6 +573,16 @@ impl From<Marked> for MarkedPageDto {
                             .into_iter()
                             .map(|c| CellChangeDto { at: c.at.to_string(), before: c.before, after: c.after })
                             .collect(),
+                    })
+                    .collect(),
+            },
+            Marked::Pages(pages) => MarkedPageDto::Pages {
+                pages: pages
+                    .into_iter()
+                    .map(|p| PageChangesDto {
+                        number: p.number,
+                        mark: p.mark.into(),
+                        spans: p.spans.into_iter().map(SpanDto::from).collect(),
                     })
                     .collect(),
             },

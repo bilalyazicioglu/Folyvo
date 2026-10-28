@@ -4,6 +4,7 @@
 mod archive;
 mod compare;
 mod excel;
+mod pdf;
 
 mod budget;
 mod reading;
@@ -18,7 +19,10 @@ use std::path::Path;
 
 pub(crate) use budget::Budget;
 pub use budget::Limits;
-pub use compare::{compare, Changes, Count, Mark, Marked, MarkedBlock, MarkedCell, Outcome, Span};
+pub use compare::{
+    compare, Changes, Count, Mark, Marked, MarkedBlock, MarkedCell, Outcome, PageChanges, Span,
+};
+pub use pdf::{is_pdf, pdf_reading};
 pub use reading::{Block, CellRef, ParaStyle, Reading, Section, Sheet, Unit, Unreadable};
 use sniff::Kind;
 

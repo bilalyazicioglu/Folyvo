@@ -6,6 +6,7 @@ pub mod dto;
 pub mod errors;
 pub mod fit;
 pub mod intent;
+pub mod pdf;
 pub mod preview;
 pub mod runtime;
 #[cfg(target_os = "macos")]
