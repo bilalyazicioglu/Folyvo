@@ -101,8 +101,8 @@ const ALIKE_LETTERS: f32 = 0.6;
 const SHORT: usize = 200;
 /// How far ahead a removed block looks for an added one it is like.
 const LOOK_AHEAD: usize = 20;
-/// Text longer than this (in bytes) is never paired as changed: comparing it word by word costs too
-/// much. A long paragraph that did not change still matches as the same.
+/// Text longer than this (in bytes) is not measured for likeness: comparing it word by word costs
+/// too much.
 const LONG: usize = 16 * 1024;
 
 pub fn compare(before: &Reading, after: &Reading) -> Changes {
@@ -189,6 +189,11 @@ fn compare_text(unit: Unit, old: &[Block], new: &[Block], deadline: Instant) -> 
             _ => pair_up(unit, &old[o], &new[n], deadline, &mut tally, &mut marked),
         }
     }
+    // Past the deadline, matching settled for less than the best, so the counts may not be true.
+    // The page can still be shown; the summary only says that something changed.
+    if Instant::now() >= deadline {
+        return Changes { outcome: Outcome::Unknown, counts: Vec::new(), marked: Marked::Text(marked) };
+    }
     let counts = tally.finish();
     let outcome = if counts.is_empty() { Outcome::SameText } else { Outcome::Text };
     Changes { outcome, counts, marked: Marked::Text(marked) }
@@ -272,23 +277,43 @@ fn pair_up(
     tally: &mut Tally,
     out: &mut Vec<MarkedBlock>,
 ) {
+    for pair in pair_in_order(old, new, |a, b| alike(a, b, deadline)) {
+        out.push(match pair {
+            Pair::Both(a, b) => changed(unit, a, b, deadline, tally),
+            Pair::Old(a) => removed(unit, a, tally),
+            Pair::New(b) => added(unit, b, tally),
+        });
+    }
+}
+
+enum Pair<'a, T> {
+    Both(&'a T, &'a T),
+    Old(&'a T),
+    New(&'a T),
+}
+
+/// Walks a removed run and an added run together, pairing alike items in order; an item with no
+/// alike partner close ahead stays removed or added.
+fn pair_in_order<'a, T>(old: &'a [T], new: &'a [T], alike: impl Fn(&T, &T) -> bool) -> Vec<Pair<'a, T>> {
     let (mut i, mut j) = (0, 0);
+    let mut out = Vec::new();
     while i < old.len() || j < new.len() {
-        if i < old.len() && j < new.len() && alike(&old[i], &new[j], deadline) {
-            out.push(changed(unit, &old[i], &new[j], deadline, tally));
+        if i < old.len() && j < new.len() && alike(&old[i], &new[j]) {
+            out.push(Pair::Both(&old[i], &new[j]));
             i += 1;
             j += 1;
-        } else if i < old.len() && new[j..].iter().take(LOOK_AHEAD).any(|b| alike(&old[i], b, deadline)) {
-            out.push(added(unit, &new[j], tally));
+        } else if i < old.len() && new[j..].iter().take(LOOK_AHEAD).any(|b| alike(&old[i], b)) {
+            out.push(Pair::New(&new[j]));
             j += 1;
         } else if i < old.len() {
-            out.push(removed(unit, &old[i], tally));
+            out.push(Pair::Old(&old[i]));
             i += 1;
         } else {
-            out.push(added(unit, &new[j], tally));
+            out.push(Pair::New(&new[j]));
             j += 1;
         }
     }
+    out
 }
 
 fn alike(a: &Block, b: &Block, deadline: Instant) -> bool {
@@ -299,17 +324,17 @@ fn alike(a: &Block, b: &Block, deadline: Instant) -> bool {
         (Block::Paragraph { section: s1, text: t1, .. }, Block::Paragraph { section: s2, text: t2, .. }) => {
             s1 == s2 && similar_text(t1, t2, deadline)
         }
-        (Block::Table { section: s1, rows: r1 }, Block::Table { section: s2, rows: r2 }) => {
-            s1 == s2 && r1.len() == r2.len() && r1.iter().zip(r2).all(|(a, b)| a.len() == b.len())
-        }
+        // Two tables in the same place are one table edited; its rows are matched in `changed`.
+        (Block::Table { section: s1, .. }, Block::Table { section: s2, .. }) => s1 == s2,
         _ => false,
     }
 }
 
 /// Alike by words, or, for short runs of text without spaces such as `y,2` and `y,3`, by letters.
 fn similar_text(a: &str, b: &str, deadline: Instant) -> bool {
+    // Too long to measure cheaply: a long paragraph in the place of another is one edited.
     if a.len().max(b.len()) > LONG {
-        return false;
+        return a.len().min(b.len()) > LONG;
     }
     let config = || {
         let mut c = TextDiff::configure();
@@ -375,32 +400,73 @@ fn changed(unit: Unit, old: &Block, new: &Block, deadline: Instant, tally: &mut 
             }
         }
         (Block::Table { rows: a, .. }, Block::Table { section, rows: b }) => {
-            let rows: Vec<Vec<MarkedCell>> = a
-                .iter()
-                .zip(b)
-                .map(|(ra, rb)| {
-                    ra.iter()
-                        .zip(rb)
-                        .map(|(ca, cb)| {
-                            if ca == cb {
-                                MarkedCell { mark: Mark::Same, spans: vec![Span::Same(cb.clone())] }
-                            } else {
-                                tally.change(Unit::Cell, 1);
-                                MarkedCell { mark: Mark::Changed, spans: words(ca, cb, deadline) }
-                            }
-                        })
-                        .collect()
-                })
-                .collect();
-            let mark = if rows.iter().flatten().any(|c| c.mark == Mark::Changed) {
-                Mark::Changed
-            } else {
-                Mark::Same
-            };
+            let rows = changed_rows(a, b, deadline, tally);
+            let mark =
+                if rows.iter().flatten().any(|c| c.mark != Mark::Same) { Mark::Changed } else { Mark::Same };
             MarkedBlock::Table { section: *section, mark, rows }
         }
         _ => unreachable!("only alike blocks are paired"),
     }
+}
+
+/// The rows of an edited table: unchanged rows kept, alike rows compared cell by cell, and rows
+/// added or removed counted by their cells. Removed rows stay in place, marked removed.
+fn changed_rows(
+    a: &[Vec<String>],
+    b: &[Vec<String>],
+    deadline: Instant,
+    tally: &mut Tally,
+) -> Vec<Vec<MarkedCell>> {
+    let key = |r: &Vec<String>| r.join("\u{1f}");
+    let (ka, kb): (Vec<String>, Vec<String>) = (a.iter().map(key).collect(), b.iter().map(key).collect());
+    let whole = |r: &Vec<String>, mark: Mark, tally: &mut Tally| -> Vec<MarkedCell> {
+        match mark {
+            Mark::Added => tally.add(Unit::Cell, r.len() as u32),
+            Mark::Removed => tally.remove(Unit::Cell, r.len() as u32),
+            Mark::Same | Mark::Changed => {}
+        }
+        r.iter()
+            .map(|c| {
+                let span = match mark {
+                    Mark::Added => Span::Added(c.clone()),
+                    Mark::Removed => Span::Removed(c.clone()),
+                    Mark::Same | Mark::Changed => Span::Same(c.clone()),
+                };
+                MarkedCell { mark, spans: vec![span] }
+            })
+            .collect()
+    };
+    // Rows of the same width sharing at least half their cells are one row edited.
+    let alike_rows = |x: &Vec<String>, y: &Vec<String>| {
+        x.len() == y.len() && x.iter().zip(y).filter(|(p, q)| p == q).count() * 2 >= x.len()
+    };
+    let mut rows = Vec::new();
+    for op in capture_diff_slices_deadline(Algorithm::Patience, &ka, &kb, Some(deadline)) {
+        let (_, o, n) = op.as_tag_tuple();
+        if let DiffOp::Equal { .. } = op {
+            rows.extend(b[n].iter().map(|r| whole(r, Mark::Same, tally)));
+            continue;
+        }
+        for pair in pair_in_order(&a[o], &b[n], alike_rows) {
+            rows.push(match pair {
+                Pair::Both(ra, rb) => ra
+                    .iter()
+                    .zip(rb)
+                    .map(|(ca, cb)| {
+                        if ca == cb {
+                            MarkedCell { mark: Mark::Same, spans: vec![Span::Same(cb.clone())] }
+                        } else {
+                            tally.change(Unit::Cell, 1);
+                            MarkedCell { mark: Mark::Changed, spans: words(ca, cb, deadline) }
+                        }
+                    })
+                    .collect(),
+                Pair::Old(ra) => whole(ra, Mark::Removed, tally),
+                Pair::New(rb) => whole(rb, Mark::Added, tally),
+            });
+        }
+    }
+    rows
 }
 
 /// `after`'s words, with those not in `before` added and those gone shown removed.
@@ -515,15 +581,30 @@ mod tests {
     }
 
     #[test]
-    fn a_reshaped_table_is_removed_and_added() {
+    fn a_row_added_to_a_table_counts_its_cells() {
+        let before = table(&[&["a", "b"], &["c", "d"], &["Total", "9"]]);
+        let after = table(&[&["a", "b"], &["c", "d"], &["e", "f"], &["Total", "10"]]);
         let c = compare(
-            &Reading::Text { unit: Unit::Paragraph, blocks: vec![table(&[&["a", "b"], &["c", "d"]])] },
+            &Reading::Text { unit: Unit::Paragraph, blocks: vec![before] },
+            &Reading::Text { unit: Unit::Paragraph, blocks: vec![after] },
+        );
+        assert_eq!(c.counts, vec![count(Unit::Cell, 2, 0, 1)]);
+        let Marked::Text(blocks) = &c.marked else { panic!() };
+        let MarkedBlock::Table { rows, .. } = &blocks[0] else { panic!() };
+        assert_eq!(rows.len(), 4);
+        assert_eq!((rows[2][0].mark, rows[3][1].mark), (Mark::Added, Mark::Changed));
+    }
+
+    #[test]
+    fn a_removed_row_counts_its_cells() {
+        let c = compare(
             &Reading::Text {
                 unit: Unit::Paragraph,
                 blocks: vec![table(&[&["a", "b"], &["c", "d"], &["e", "f"]])],
             },
+            &Reading::Text { unit: Unit::Paragraph, blocks: vec![table(&[&["a", "b"], &["e", "f"]])] },
         );
-        assert_eq!(c.counts, vec![count(Unit::Cell, 6, 4, 0)]);
+        assert_eq!(c.counts, vec![count(Unit::Cell, 0, 2, 0)]);
     }
 
     #[test]
@@ -559,18 +640,19 @@ mod tests {
     }
 
     #[test]
-    fn past_the_deadline_nothing_more_is_paired() {
+    fn past_the_deadline_the_counts_are_unknown() {
         let before = text(Unit::Paragraph, &["Support, 12 months"]);
         let after = text(Unit::Paragraph, &["Support, 18 months"]);
         let c = compare_until(&before, &after, Instant::now());
-        assert_eq!(c.counts, vec![count(Unit::Paragraph, 1, 1, 0)]);
+        assert_eq!((c.outcome, c.counts.len()), (Outcome::Unknown, 0));
+        assert!(matches!(c.marked, Marked::Text(_)), "the page can still be shown");
     }
 
     #[test]
-    fn a_long_paragraph_is_only_alike_when_unchanged() {
+    fn a_long_paragraph_with_one_edit_is_one_changed() {
         let long = "word ".repeat(5_000);
         let c = compare(&text(Unit::Paragraph, &[&long]), &text(Unit::Paragraph, &[&format!("{long}more")]));
-        assert_eq!(c.counts, vec![count(Unit::Paragraph, 1, 1, 0)]);
+        assert_eq!(c.counts, vec![count(Unit::Paragraph, 0, 0, 1)]);
     }
 
     #[test]
