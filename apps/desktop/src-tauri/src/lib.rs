@@ -129,6 +129,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Folyvo could not start")
         .run(|app, event| {
+            // Out of the Dock again once the versions window closes; its Dock icon brings it back.
+            match &event {
+                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
+                    tray::follow_windows(app, Some(label.as_str()));
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    if let Some(w) = app.get_webview_window(tray::VERSIONS) {
+                        let _ = w.unminimize();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }
+                _ => {}
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
                 let home = app.path().home_dir().unwrap_or_default();
