@@ -27,7 +27,7 @@ pub use reading::{Block, CellRef, ParaStyle, Reading, Section, Sheet, Unit, Unre
 use sniff::Kind;
 
 /// Bumped whenever reading or comparing changes what it finds, so stored summaries are redone.
-pub const READER_VERSION: i64 = 1;
+pub const READER_VERSION: i64 = 2;
 
 /// Kinds read as plain text (UTF-8 only).
 pub const TEXT_KINDS: &[&str] =
