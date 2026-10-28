@@ -9,6 +9,7 @@ import type { CopyDto } from "./generated/CopyDto";
 import type { ExportDto } from "./generated/ExportDto";
 import type { MatchDto } from "./generated/MatchDto";
 import type { PreviewDto } from "./generated/PreviewDto";
+import type { MarkedPageDto } from "./generated/MarkedPageDto";
 import type { FolderDto } from "./generated/FolderDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
 import type { RestoreDto } from "./generated/RestoreDto";
@@ -63,6 +64,8 @@ export const api = {
   sendCopy: (item: string, version: string, from: DOMRect) =>
     call<void>("send_copy", { item, version, x: from.x, y: from.y, w: from.width, h: from.height }),
   preview: (item: string, version: string) => call<PreviewDto>("preview", { item, version }),
+  /** One save's text with what changed since the save before marked. */
+  changes: (item: string, version: string) => call<MarkedPageDto>("changes", { item, version }),
   /** Opens the working file (newest) or a read-only copy of the version in its app. */
   openVersion: (item: string, version: string, newest: boolean) =>
     call<void>("open_version", { item, version, newest }),

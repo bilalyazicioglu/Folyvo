@@ -52,3 +52,16 @@ test("which passes the path and returns the matches", async () => {
   expect(await api.which("/Users/a/back.docx")).toEqual([]);
   expect(seen).toEqual({ path: "/Users/a/back.docx" });
 });
+
+test("changes asks for one save's marked page", async () => {
+  let seen: unknown;
+  mockIPC((cmd, args) => {
+    if (cmd === "changes") {
+      seen = args;
+      return { kind: "unreadable" };
+    }
+  });
+  const page = await api.changes("itm_01", "ver_02");
+  expect(seen).toEqual({ item: "itm_01", version: "ver_02" });
+  expect(page).toEqual({ kind: "unreadable" });
+});

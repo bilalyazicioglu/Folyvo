@@ -157,7 +157,7 @@ fn next(queue: &Shared) -> Option<VersionId> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use folyvo_core::engine::{CompareInputs, Engine};
     use folyvo_core::model::{ChangeCount, ChangeOutcome, ChangeUnit, ContentHash, ItemId, VersionId};
@@ -177,6 +177,40 @@ mod tests {
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         zip.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).unwrap();
         zip.write_all(xml.as_bytes()).unwrap();
+        zip.finish().unwrap();
+        path
+    }
+
+    /// An Excel file with one sheet, `Costs`, holding `cells` as numbers.
+    pub(crate) fn xlsx(dir: &Path, name: &str, cells: &[(&str, &str)]) -> PathBuf {
+        let s = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        let r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let data: String =
+            cells.iter().map(|(a, v)| format!(r#"<row><c r="{a}"><v>{v}</v></c></row>"#)).collect();
+        let parts = [
+            (
+                "xl/workbook.xml",
+                format!(
+                    r#"<workbook xmlns="{s}" xmlns:r="{r}"><sheets><sheet name="Costs" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+                ),
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                format!(
+                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{r}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#
+                ),
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                format!(r#"<worksheet xmlns="{s}"><sheetData>{data}</sheetData></worksheet>"#),
+            ),
+        ];
+        let path = dir.join(name);
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for (part, xml) in parts {
+            zip.start_file(part, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+        }
         zip.finish().unwrap();
         path
     }

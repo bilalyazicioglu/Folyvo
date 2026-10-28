@@ -81,6 +81,7 @@ pub fn run() {
             commands::item_at,
             commands::which,
             commands::preview,
+            commands::changes,
             commands::open_version,
             commands::restore,
             commands::stats,
