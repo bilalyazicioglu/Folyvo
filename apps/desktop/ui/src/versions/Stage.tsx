@@ -9,7 +9,9 @@ import {
 } from "react";
 import { DocIcon } from "../components/DocIcon";
 import type { FileKind } from "../files";
+import type { MarkedPageDto } from "../generated/MarkedPageDto";
 import type { PreviewDto } from "../generated/PreviewDto";
+import { MarkedPage } from "./MarkedPage";
 
 /** How far a page must travel before letting go throws it instead of springing back. */
 export const THROW_PX = 120;
@@ -29,6 +31,13 @@ interface Props {
   newer: number;
   onOlder: () => void;
   onNewer: () => void;
+  /** What changed since the save before, in words; none for the first save or while unknown. */
+  summary: string | null;
+  /** Whether the words can be shown marked, and whether they are. */
+  canShowChanges: boolean;
+  showingChanges: boolean;
+  onShowChanges: (show: boolean) => void;
+  marked: MarkedPageDto | undefined;
 }
 
 type Dir = 1 | -1;
@@ -37,7 +46,23 @@ type Dir = 1 | -1;
  * A picture of the file at one time, on top of a pile of the saves before it. Throwing the page
  * aside shows the save under it; pulling the other way brings the newer one back. Evidence, never an editor.
  */
-export function Stage({ name, kind, when, meta, preview, failed, older, newer, onOlder, onNewer }: Props) {
+export function Stage({
+  name,
+  kind,
+  when,
+  meta,
+  preview,
+  failed,
+  older,
+  newer,
+  onOlder,
+  onNewer,
+  summary,
+  canShowChanges,
+  showingChanges,
+  onShowChanges,
+  marked,
+}: Props) {
   const [dx, setDx] = useState(0);
   const from = useRef<number | null>(null);
   const [thrown, setThrown] = useState<{
@@ -141,7 +166,9 @@ export function Stage({ name, kind, when, meta, preview, failed, older, newer, o
             <div key={i} className={`stage__page stage__page--${i + 1}`} aria-hidden="true" />
           ))}
           <div className="stage__top" style={top}>
-            {preview?.text ? (
+            {showingChanges ? (
+              <MarkedPage page={marked} when={when} />
+            ) : preview?.text ? (
               <div className="stage__paper" role="img" aria-label={`Picture of ${name} as it was ${when}`}>
                 <pre aria-hidden="true">{preview.text}</pre>
               </div>
@@ -191,6 +218,23 @@ export function Stage({ name, kind, when, meta, preview, failed, older, newer, o
         </button>
       </div>
       <p className="stage__meta">{meta}</p>
+      {showingChanges ? (
+        <button type="button" className="stage__what" onClick={() => onShowChanges(false)}>
+          Show the picture
+        </button>
+      ) : canShowChanges && summary ? (
+        <button
+          type="button"
+          className="stage__what"
+          aria-label={`Show what changed: ${summary}`}
+          onClick={() => onShowChanges(true)}
+        >
+          <span className="stage__swatch" aria-hidden="true" />
+          {summary}
+        </button>
+      ) : (
+        summary && <p className="stage__what stage__what--quiet">{summary}</p>
+      )}
     </section>
   );
 }

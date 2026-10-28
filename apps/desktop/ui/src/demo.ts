@@ -1,6 +1,8 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { CopyDto } from "./generated/CopyDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
+import type { MarkedBlockDto } from "./generated/MarkedBlockDto";
+import type { MarkedPageDto } from "./generated/MarkedPageDto";
 import type { VersionDto } from "./generated/VersionDto";
 
 type Args = Record<string, unknown>;
@@ -15,6 +17,57 @@ const PAGE =
       Array.from({ length: 22 }, (_, i) => `<rect x="72" y="${140 + i * 26}" width="${420 + ((i * 37) % 48)}" height="9" fill="#c9cad0"/>`).join("") +
       `</svg>`,
   );
+
+const same = (text: string) => [{ kind: "same" as const, text }];
+const para = (text: string, mark: "same" | "added" = "same", level?: number): MarkedBlockDto => ({
+  kind: "paragraph",
+  section: "body",
+  style: level === undefined ? { kind: "body" } : { kind: "heading", level },
+  mark,
+  spans: mark === "added" ? [{ kind: "added", text }] : same(text),
+});
+const cell = (text: string, mark: "same" | "changed" = "same", before?: string) => ({
+  mark,
+  spans: mark === "changed" ? [{ kind: "removed" as const, text: before! }, { kind: "added" as const, text }] : same(text),
+});
+const DEMO_PAGE: MarkedPageDto = {
+  kind: "text",
+  blocks: [
+    para("Proposal: warehouse automation", "same", 1),
+    para("Following our call, here is our proposal for one warehouse, covering setup, software and support."),
+    {
+      kind: "table",
+      section: "body",
+      mark: "changed",
+      rows: [
+        [cell("Setup and training"), cell("€4,800")],
+        [cell("Warehouse software, yearly"), cell("€3,600")],
+        [cell("Support, 18 months", "changed", "Support, 12 months"), cell("€2,400", "changed", "€1,800")],
+        [cell("Total"), cell("€10,800")],
+      ],
+    },
+    {
+      kind: "paragraph",
+      section: "body",
+      style: { kind: "body" },
+      mark: "changed",
+      spans: [{ kind: "same", text: "This proposal is valid for " }, { kind: "removed", text: "30" }, { kind: "added", text: "45" }, { kind: "same", text: " days. Let us know if anything is unclear." }],
+    },
+    para("Installation can start the week after the order is signed.", "added"),
+    para("Kind regards,\nSam Porter"),
+    { kind: "paragraph", section: "footer", style: { kind: "body" }, mark: "same", spans: same("Acme Logistics Ltd. Page 1 of 1") },
+  ],
+};
+const DEMO_SHEETS: MarkedPageDto = {
+  kind: "sheets",
+  sheets: [
+    { name: "Costs", mark: "changed", cells: [
+      { at: "C7", before: "1800", after: "2400" },
+      { at: "C9", before: "10200", after: "10800" },
+      { at: "B12", before: null, after: "Paid in two parts" },
+    ] },
+  ],
+};
 
 /** An in-memory stand-in for the Rust backend, used for design review and screenshots (`?demo=1`). */
 export function demoHandlers() {
@@ -33,14 +86,18 @@ export function demoHandlers() {
   });
   const histories: Record<string, VersionDto[]> = {
     itm_demo1: [
-      v(9, 2, 412_000),
-      v(8, 95, 398_000, { note: "Before the Acme call" }),
-      v(7, 140, 301_000),
-      v(6, 300, 196_000, { note: "Pricing section added" }),
-      v(5, 1_500, 88_000),
+      v(9, 2, 412_000, { change: { outcome: "text", counts: [{ unit: "paragraph", added: 1, removed: 0, changed: 1 }, { unit: "cell", added: 0, removed: 0, changed: 2 }] } }),
+      v(8, 95, 398_000, { note: "Before the Acme call", change: { outcome: "sameText", counts: [] } }),
+      v(7, 140, 301_000, { change: { outcome: "text", counts: [{ unit: "paragraph", added: 0, removed: 1, changed: 0 }] } }),
+      v(6, 300, 196_000, { note: "Pricing section added", change: { outcome: "text", counts: [{ unit: "paragraph", added: 4, removed: 0, changed: 0 }] } }),
+      v(5, 1_500, 88_000, { change: { outcome: "unknown", counts: [] } }),
       v(1, 2_900, 12_000, { origin: "initial" }),
     ],
-    itm_demo2: [v(4, 60, 2_400_000), v(3, 400, 2_100_000), v(1, 3_000, 900_000, { origin: "initial" })],
+    itm_demo2: [
+      v(4, 60, 2_400_000, { change: { outcome: "text", counts: [{ unit: "cell", added: 1, removed: 0, changed: 2 }] } }),
+      v(3, 400, 2_100_000, { change: { outcome: "text", counts: [{ unit: "sheet", added: 1, removed: 0, changed: 0 }] } }),
+      v(1, 3_000, 900_000, { origin: "initial" }),
+    ],
     itm_demo3: [v(2, 1_440, 6_800_000), v(1, 4_400, 6_500_000, { origin: "initial" })],
   };
   const names: Record<string, string> = { itm_demo1: "Proposal_Acme.docx", itm_demo2: "Budget_2027.xlsx", itm_demo3: "Pitch_deck.pptx" };
@@ -76,6 +133,7 @@ export function demoHandlers() {
       revealsCopy: false,
       appName: a.item === "itm_demo2" ? "Microsoft Excel" : a.item === "itm_demo3" ? null : "Microsoft Word",
     }),
+    changes: (a: Args) => (a.item === "itm_demo2" ? DEMO_SHEETS : DEMO_PAGE),
     item_at: (_: Args) => null,
     which: (_: Args) => [],
     export: (a: Args) => {

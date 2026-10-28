@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api, AppError } from "../api";
+import { changeSummary } from "../changes";
 import { copyLabel } from "../copies";
 import { DocIcon } from "../components/DocIcon";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { fileKind } from "../files";
-import { useAction, useCopies, useHistory, useItem, useNow, usePreview } from "../queries";
+import { useAction, useChanges, useCopies, useHistory, useItem, useNow, usePreview } from "../queries";
 import { folderName, sizeLabel } from "../files";
 import { needsSeconds, whenLabel } from "../time";
 import { Stage } from "./Stage";
@@ -26,12 +27,16 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
   const started = useRef(false);
   const sendRef = useRef<HTMLButtonElement>(null);
   const [saved, setSaved] = useState<{ folder: string; path: string } | null>(null);
+  // Stays on while paging through saves, so changes can be read one save after another.
+  const [showChanges, setShowChanges] = useState(false);
 
   const summary = file.data;
   const name = summary?.name ?? "";
   const versions = history.data ?? [];
   const selected = versions.find((v) => v.id === selectedId) ?? versions[0];
   const preview = usePreview(itemId, selected?.id);
+  const canShowChanges = selected?.change?.outcome === "text";
+  const marked = useChanges(itemId, selected?.id, showChanges && canShowChanges);
 
   useEffect(() => {
     if (!name) return;
@@ -152,6 +157,11 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
           newer={index}
           onOlder={() => select(versions[index + 1].id)}
           onNewer={() => select(versions[index - 1].id)}
+          summary={changeSummary(selected.change)}
+          canShowChanges={canShowChanges}
+          showingChanges={showChanges && canShowChanges}
+          onShowChanges={setShowChanges}
+          marked={marked.data}
         />
 
         {confirming && (

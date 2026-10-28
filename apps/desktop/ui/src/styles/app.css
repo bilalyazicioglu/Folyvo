@@ -117,6 +117,40 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .stage__none { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); }
 .stage__none p { margin: 0; }
 .stage__meta { position: relative; margin: 14px 0 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* What changed since the save before: a quiet pill under the page that turns the page into marked words. */
+.stage__what { position: relative; display: inline-flex; align-items: center; gap: 7px; margin: 8px 0 0; padding: 4px 12px 4px 10px; border: 0; border-radius: 999px; background: var(--field); color: var(--ink); font: inherit; font-size: 12.5px; }
+.stage__what:hover { background: var(--hover); }
+.stage__what:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.stage__what--quiet { background: none; color: var(--muted); padding: 0; }
+.stage__swatch { width: 14px; height: 9px; border-radius: 2px; background: #a8e3bf; transform: skewX(-12deg); box-shadow: inset 0 0 0 1px rgb(31 122 77 / 0.25); }
+
+/* The marked page: paper as Word users know it from tracked changes. A bar in the margin beside
+   anything that changed, new words under a highlighter, removed words struck through in red pencil.
+   The paper is always white, so its colours do not follow the dark scheme. */
+.stage__paper.marked { display: block; overflow: auto; padding: 7% 8% 7% 10%; pointer-events: auto; font: 12.5px/1.6 var(--font); color: #1d1d1f; scrollbar-width: thin; }
+.marked h2, .marked h3, .marked p { position: relative; margin: 0 0 0.75em; }
+.marked h2 { font-size: 16px; line-height: 1.3; font-weight: 650; }
+.marked h3 { font-size: 13.5px; line-height: 1.35; font-weight: 650; }
+.marked__item { padding-left: 1.2em; }
+.marked__item::after { content: ""; position: absolute; left: 0.35em; top: 0.7em; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.marked [data-mark="added"], .marked [data-mark="removed"], .marked [data-mark="changed"] { position: relative; }
+.marked [data-mark="added"]::before, .marked [data-mark="removed"]::before, .marked [data-mark="changed"]::before { content: ""; position: absolute; left: -14px; top: 0.2em; bottom: 0.2em; width: 2px; border-radius: 1px; background: #1f7a4d; }
+.marked [data-mark="removed"]::before { background: #c4352b; }
+.marked td[data-mark]::before, .marked tr[data-mark]::before { display: none; }
+.marked ins { text-decoration: none; padding: 0 1px; border-radius: 2px; background: linear-gradient(transparent 12%, #b6e8c8 12%, #b6e8c8 88%, transparent 88%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.marked p, .marked td { white-space: pre-line; }
+.marked del + ins, .marked ins + del { margin-left: 3px; }
+.marked del { color: #9b2c25; text-decoration: line-through; text-decoration-color: #c4352b; text-decoration-thickness: 1.5px; }
+.marked__section { margin: 1.6em 0 0.6em; padding-top: 0.8em; border-top: 1px solid #e3e3e8; color: #6e6e73; font-size: 11px; }
+.marked__block:first-child .marked__section { margin-top: 0; padding-top: 0; border-top: 0; }
+.marked__quiet { color: #6e6e73; }
+.marked__sheet + .marked__sheet { margin-top: 1.6em; }
+.marked table { width: 100%; margin: 0 0 1em; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.marked td, .marked th { padding: 4px 6px; border: 1px solid #e3e3e8; text-align: left; vertical-align: top; font-weight: 400; }
+.marked td[data-mark="changed"], .marked td[data-mark="added"] { background: #f1faf4; }
+.marked td[data-mark="removed"] { background: #fdf1f0; }
+.marked__cells thead th { color: #6e6e73; font-size: 11px; }
+.marked__cells tbody th { width: 4.5em; color: #6e6e73; }
 
 .versions__bar { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; justify-content: center; pointer-events: none; }
 .versions__pill { pointer-events: auto; display: flex; gap: 8px; padding: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 62%, transparent); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
@@ -137,6 +171,10 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .times__row[data-copied="true"] .times__rail::after { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .times__row[aria-selected="true"] .times__rail::after { background: var(--accent-ink); box-shadow: none; }
 .times__time { font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.times__row { flex-direction: column; align-items: stretch; justify-content: center; gap: 1px; }
+.times__line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.times__what { font-size: 11.5px; color: var(--muted); }
+.times__row[aria-selected="true"] .times__what { color: var(--accent-ink); opacity: 0.8; }
 .times__note { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-style: normal; opacity: 0.75; }
 .chip { flex: 0 0 auto; margin-left: auto; padding: 2px 8px; white-space: nowrap; border-radius: 9px; font-size: 11.5px; font-weight: 500; background: var(--accent-soft); color: var(--accent-text); }
 .times__row[aria-selected="true"] .chip { background: rgb(255 255 255 / 0.22); color: var(--accent-ink); }

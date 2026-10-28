@@ -14,6 +14,15 @@ export const useActivity = (from: number, to: number) =>
 /** A version's picture never changes, so it is drawn once per window. */
 export const usePreview = (item: string, version?: string) =>
   useQuery({ queryKey: ["preview", item, version], queryFn: () => api.preview(item, version!), enabled: !!version, staleTime: Infinity, retry: false });
+/** A save's text with what changed marked. Asked for only while it is on screen; it never changes. */
+export const useChanges = (item: string, version: string | undefined, enabled: boolean) =>
+  useQuery({
+    queryKey: ["changes", item, version],
+    queryFn: () => api.changes(item, version!),
+    enabled: enabled && !!version,
+    staleTime: Infinity,
+    retry: false,
+  });
 export const useCopies = (item?: string) =>
   useQuery({ queryKey: ["copies", item], queryFn: () => api.copies(item!), enabled: !!item });
 
