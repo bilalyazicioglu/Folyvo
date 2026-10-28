@@ -42,11 +42,12 @@ pub(crate) struct Budget {
     pub(crate) limits: Limits,
     deadline: Instant,
     text: usize,
+    cells: usize,
 }
 
 impl Budget {
     pub(crate) fn new(limits: &Limits) -> Budget {
-        Budget { limits: limits.clone(), deadline: Instant::now() + limits.time, text: 0 }
+        Budget { limits: limits.clone(), deadline: Instant::now() + limits.time, text: 0, cells: 0 }
     }
 
     pub(crate) fn tick(&mut self) -> Result<(), Unreadable> {
@@ -60,6 +61,15 @@ impl Budget {
     pub(crate) fn add_text(&mut self, n: usize) -> Result<(), Unreadable> {
         self.text += n;
         if self.text > self.limits.text_bytes {
+            Err(Unreadable::TooLarge)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn add_cell(&mut self) -> Result<(), Unreadable> {
+        self.cells += 1;
+        if self.cells > self.limits.cells {
             Err(Unreadable::TooLarge)
         } else {
             Ok(())

@@ -134,8 +134,14 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
             }
             "tbl" => tables.push(Table { paras: paras.len(), ..Table::default() }),
             "tc" => {
+                budget.add_cell()?;
                 if let Some(t) = tables.last_mut() {
-                    t.cell = Some(String::new());
+                    // `<w:tc/>` has no end tag: it is an empty cell at once.
+                    if opens {
+                        t.cell = Some(String::new());
+                    } else {
+                        t.row.push(String::new());
+                    }
                 }
             }
             _ => {}
@@ -439,6 +445,29 @@ mod tests {
         );
         let got = read(&docx(d.path(), &body, &[]), "a.docx");
         assert!(matches!(got, Reading::Text { .. } | Reading::Unreadable(_)));
+    }
+
+    #[test]
+    fn nesting_past_the_depth_limit_is_too_large() {
+        let d = tempfile::tempdir().unwrap();
+        let body = format!(
+            "{}{}{}",
+            "<w:tbl><w:tr><w:tc>".repeat(100),
+            wp("x"),
+            "</w:tc></w:tr></w:tbl>".repeat(100)
+        );
+        assert_eq!(read(&docx(d.path(), &body, &[]), "a.docx"), Reading::Unreadable(Unreadable::TooLarge));
+    }
+
+    #[test]
+    fn too_many_table_cells_is_too_large() {
+        let d = tempfile::tempdir().unwrap();
+        let limits = Limits { cells: 3, ..Limits::DEFAULT };
+        let body = "<w:tbl><w:tr><w:tc/><w:tc/></w:tr><w:tr><w:tc/><w:tc/></w:tr></w:tbl>";
+        assert_eq!(
+            read_with(&docx(d.path(), body, &[]), "a.docx", &limits),
+            Reading::Unreadable(Unreadable::TooLarge)
+        );
     }
 
     #[test]

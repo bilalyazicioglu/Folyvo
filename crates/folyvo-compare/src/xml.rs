@@ -15,6 +15,9 @@ pub(crate) enum Ev {
     Text(String),
 }
 
+/// Deeper than this is not a real document; it only costs memory and time.
+pub(crate) const MAX_DEPTH: usize = 256;
+
 pub(crate) struct Xml<'a> {
     reader: Reader<&'a [u8]>,
     events: u32,
@@ -37,6 +40,9 @@ impl<'a> Xml<'a> {
             return Ok(Some(match event {
                 Event::Start(e) => {
                     self.depth += 1;
+                    if self.depth > MAX_DEPTH {
+                        return Err(Unreadable::TooLarge);
+                    }
                     Ev::Start(local(e.name().as_ref())?, attributes(&e)?)
                 }
                 Event::Empty(e) => Ev::Empty(local(e.name().as_ref())?, attributes(&e)?),
