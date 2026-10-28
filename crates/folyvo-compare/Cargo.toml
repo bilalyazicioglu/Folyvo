@@ -1,0 +1,11 @@
+[package]
+name = "folyvo-compare"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

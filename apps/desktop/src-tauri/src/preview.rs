@@ -27,8 +27,7 @@ pub fn thumbnail(src: &Path, cache_dir: &Path, key: &str) -> Option<PathBuf> {
 }
 
 /// Kinds shown as their own words. Quick Look draws plain text dark-on-dark in the dark appearance.
-const TEXT_KINDS: &[&str] =
-    &["txt", "text", "md", "markdown", "csv", "tsv", "json", "log", "xml", "yml", "yaml"];
+use folyvo_compare::TEXT_KINDS;
 /// The most of a text file that is shown: its first lines, and never more than this many bytes.
 pub const EXCERPT_LINES: usize = 60;
 pub const EXCERPT_BYTES: usize = 16 * 1024;

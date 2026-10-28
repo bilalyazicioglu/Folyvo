@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/folyvo-core", "crates/folyvo-cli", "apps/desktop/src-tauri"]
+members = ["crates/folyvo-core", "crates/folyvo-cli", "crates/folyvo-compare", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2021"
