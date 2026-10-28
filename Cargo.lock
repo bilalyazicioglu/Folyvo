@@ -1124,6 +1124,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "folyvo-compare"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "folyvo-core"
 version = "0.1.0"
 dependencies = [
@@ -1145,6 +1152,7 @@ name = "folyvo-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "folyvo-compare",
  "folyvo-core",
  "objc2",
  "objc2-app-kit",
