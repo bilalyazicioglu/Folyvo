@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 quick-xml = "0.42"
+similar = "3.2.1"
 zip = { version = "9.1.3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
