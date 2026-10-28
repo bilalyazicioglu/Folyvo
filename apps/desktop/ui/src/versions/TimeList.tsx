@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent } from "react";
+import { changeSummary } from "../changes";
 import { copyLabel } from "../copies";
 import type { CopyDto } from "../generated/CopyDto";
 import type { VersionDto } from "../generated/VersionDto";
@@ -45,6 +46,7 @@ export function TimeList({ versions, copies, selected, now, onSelect }: Props) {
           </li>
           {g.versions.map((v) => {
             const left = copies.filter((c) => c.versionId === v.id);
+            const what = changeSummary(v.change);
             return (
               <li
                 key={v.id}
@@ -57,13 +59,16 @@ export function TimeList({ versions, copies, selected, now, onSelect }: Props) {
                 onClick={() => onSelect(v.id)}
               >
                 <span className="times__rail" aria-hidden="true" />
-                <span className="times__time">{clock(v.createdAt, seconds.has(v.createdAt))}</span>
-                {v.note && <em className="times__note">{v.note}</em>}
-                {left.map((c) => (
-                  <span key={`${c.kind}-${c.at}`} className="chip">
-                    {copyLabel(c)}
-                  </span>
-                ))}
+                <span className="times__line">
+                  <span className="times__time">{clock(v.createdAt, seconds.has(v.createdAt))}</span>
+                  {v.note && <em className="times__note">{v.note}</em>}
+                  {left.map((c) => (
+                    <span key={`${c.kind}-${c.at}`} className="chip">
+                      {copyLabel(c)}
+                    </span>
+                  ))}
+                </span>
+                {what && <span className="times__what">{what}</span>}
               </li>
             );
           })}

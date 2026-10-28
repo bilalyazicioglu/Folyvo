@@ -304,3 +304,83 @@ test("opened to send a copy, the share sheet opens once for the newest save", as
   await userEvent.click(await option("09:58"));
   expect(b.called("send_copy")).toHaveLength(1);
 });
+
+const paragraphsChanged = { outcome: "text" as const, counts: [{ unit: "paragraph" as const, added: 0, removed: 0, changed: 2 }] };
+
+test("each saved time says what changed since the one before", async () => {
+  const b = backend();
+  b.state.history.itm_01[0] = version({ seq: 3, createdAt: at(26, 10, 12), size: 48_000, change: paragraphsChanged });
+  b.state.history.itm_01[1] = version({ seq: 2, createdAt: at(26, 9, 58), change: { outcome: "sameText", counts: [] } });
+  renderWithClient(<Versions itemId="itm_01" />);
+  expect(within(await option("10:12")).getByText("2 paragraphs changed")).toBeInTheDocument();
+  expect(within(await option("09:58")).getByText("Same text, other changes")).toBeInTheDocument();
+  expect(within(await option("17:20")).queryByText(/changed|Same/)).toBeNull();
+});
+
+test("the page can show what changed and go back to the picture", async () => {
+  const b = backend();
+  b.state.history.itm_01[0] = version({ seq: 3, createdAt: at(26, 10, 12), size: 48_000, change: paragraphsChanged });
+  b.state.handlers.changes = () => ({
+    kind: "text",
+    blocks: [
+      { kind: "paragraph", section: "body", style: { kind: "heading", level: 1 }, mark: "same", spans: [{ kind: "same", text: "Proposal" }] },
+      {
+        kind: "paragraph",
+        section: "body",
+        style: { kind: "body" },
+        mark: "changed",
+        spans: [
+          { kind: "same", text: "Support, " },
+          { kind: "removed", text: "12" },
+          { kind: "added", text: "18" },
+          { kind: "same", text: " months" },
+        ],
+      },
+      { kind: "paragraph", section: "footer", style: { kind: "body" }, mark: "added", spans: [{ kind: "added", text: "Page 1 of 2" }] },
+    ],
+  });
+  const { container } = renderWithClient(<Versions itemId="itm_01" />);
+  await screen.findByRole("img", { name: /Picture of/ });
+  await userEvent.click(screen.getByRole("button", { name: "Show what changed: 2 paragraphs changed" }));
+  const page = await screen.findByRole("document", { name: "What changed in Today 10:12" });
+  expect(b.called("changes")[0].args).toEqual({ item: "itm_01", version: "ver_03" });
+  expect(within(page).getByRole("heading", { name: "Proposal" })).toBeInTheDocument();
+  expect(within(page).getByText("18").tagName).toBe("INS");
+  expect(within(page).getByText("12").tagName).toBe("DEL");
+  expect(within(page).getByText("Footer")).toBeInTheDocument();
+  expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Show the picture" }));
+  expect(await screen.findByRole("img", { name: /Picture of/ })).toBeInTheDocument();
+});
+
+test("a spreadsheet shows its changed cells before and after", async () => {
+  const b = backend();
+  b.state.history.itm_01[0] = version({
+    seq: 3,
+    createdAt: at(26, 10, 12),
+    change: { outcome: "text", counts: [{ unit: "cell", added: 0, removed: 0, changed: 1 }] },
+  });
+  b.state.handlers.changes = () => ({
+    kind: "sheets",
+    sheets: [
+      { name: "Costs", mark: "changed", cells: [{ at: "C7", before: "1800", after: "2400" }] },
+      { name: "Notes", mark: "added", cells: [] },
+    ],
+  });
+  renderWithClient(<Versions itemId="itm_01" />);
+  await userEvent.click(await screen.findByRole("button", { name: "Show what changed: 1 cell changed" }));
+  const page = await screen.findByRole("document", { name: "What changed in Today 10:12" });
+  const row = within(page).getByRole("row", { name: /C7/ });
+  expect(row).toHaveTextContent("C7");
+  expect(row).toHaveTextContent("1800");
+  expect(row).toHaveTextContent("2400");
+  expect(within(page).getByText("Sheet added")).toBeInTheDocument();
+});
+
+test("a save with nothing to show says so without a button", async () => {
+  const b = backend();
+  b.state.history.itm_01[0] = version({ seq: 3, createdAt: at(26, 10, 12), change: { outcome: "unknown", counts: [] } });
+  renderWithClient(<Versions itemId="itm_01" />);
+  await screen.findByRole("img", { name: /Picture of/ });
+  expect(screen.queryByRole("button", { name: /Show what changed/ })).toBeNull();
+});
