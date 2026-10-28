@@ -23,7 +23,7 @@ const verbs = (c: ChangeCountDto): [number, string][] =>
 
 /**
  * What changed in a save, in words that are literally true: "2 paragraphs changed",
- * "1 paragraph added, 1 removed", "2 paragraphs and 1 cell changed". At most the two units with
+ * "1 paragraph added, 1 paragraph removed", "2 paragraphs and 1 cell changed". At most the two units with
  * the most changes are named. `null` when there is nothing to say (the first save, or not known yet).
  */
 export function changeSummary(change: ChangeDto | null): string | null {
@@ -51,7 +51,7 @@ export function changeSummary(change: ChangeDto | null): string | null {
   return units
     .map((u, i) => {
       const [[first, verb], ...rest] = i === 0 ? a : b;
-      return [`${counted(first, u.unit)} ${verb}`, ...rest.map(([m, v]) => `${m} ${v}`)].join(", ");
+      return [`${counted(first, u.unit)} ${verb}`, ...rest.map(([m, v]) => `${counted(m, u.unit)} ${v}`)].join(", ");
     })
     .join(", ");
 }

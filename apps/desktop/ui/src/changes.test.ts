@@ -17,9 +17,10 @@ test("one kind of change in one unit reads as a count", () => {
   expect(text(n("line", 0, 3))).toBe("3 lines removed");
 });
 
-test("several kinds in one unit share the unit's name", () => {
-  expect(text(n("paragraph", 1, 1))).toBe("1 paragraph added, 1 removed");
-  expect(text(n("paragraph", 2, 0, 1))).toBe("1 paragraph changed, 2 added");
+test("several kinds in one unit each name the unit", () => {
+  expect(text(n("paragraph", 1, 1))).toBe("1 paragraph added, 1 paragraph removed");
+  expect(text(n("paragraph", 2, 0, 1))).toBe("1 paragraph changed, 2 paragraphs added");
+  expect(text(n("page", 1, 0, 1))).toBe("1 page changed, 1 page added");
 });
 
 test("two units changed the same way are named together", () => {
