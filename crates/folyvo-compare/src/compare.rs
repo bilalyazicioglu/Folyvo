@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use similar::{capture_diff_slices_deadline, Algorithm, ChangeTag, DiffOp, TextDiff};
 
-use crate::{Block, ParaStyle, Reading, Section, Unit};
+use crate::{Block, CellRef, ParaStyle, Reading, Section, Sheet, Unit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -54,7 +54,24 @@ pub enum MarkedBlock {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Marked {
     Text(Vec<MarkedBlock>),
+    Sheets(Vec<SheetChanges>),
     Nothing,
+}
+
+/// A sheet, matched by name. An added or removed sheet lists no cells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetChanges {
+    pub name: String,
+    pub mark: Mark,
+    pub cells: Vec<CellChange>,
+}
+
+/// One cell that differs: both values for a changed cell, one for an added or removed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellChange {
+    pub at: CellRef,
+    pub before: Option<String>,
+    pub after: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +107,7 @@ pub(crate) fn compare_until(before: &Reading, after: &Reading, deadline: Instant
         (Reading::Text { unit: a, blocks: old }, Reading::Text { unit: b, blocks: new }) if a == b => {
             compare_text(*a, old, new, deadline)
         }
+        (Reading::Sheets(old), Reading::Sheets(new)) => compare_sheets(old, new),
         _ => Changes { outcome: Outcome::Unknown, counts: Vec::new(), marked: Marked::Nothing },
     }
 }
@@ -164,6 +182,45 @@ fn compare_text(unit: Unit, old: &[Block], new: &[Block], deadline: Instant) -> 
     let counts = tally.finish();
     let outcome = if counts.is_empty() { Outcome::SameText } else { Outcome::Text };
     Changes { outcome, counts, marked: Marked::Text(marked) }
+}
+
+/// Sheets by name, in the later file's order, with removed sheets after them.
+fn compare_sheets(old: &[Sheet], new: &[Sheet]) -> Changes {
+    let mut tally = Tally::default();
+    let mut marked = Vec::new();
+    let named = |sheets: &[Sheet], name: &str| sheets.iter().position(|s| s.name == name);
+    for sheet in new {
+        let Some(at) = named(old, &sheet.name) else {
+            tally.add(Unit::Sheet, 1);
+            marked.push(SheetChanges { name: sheet.name.clone(), mark: Mark::Added, cells: Vec::new() });
+            continue;
+        };
+        let (before, after) = (&old[at].cells, &sheet.cells);
+        let mut places: Vec<&CellRef> = before.keys().chain(after.keys()).collect();
+        places.sort();
+        places.dedup();
+        let mut cells = Vec::new();
+        for place in places {
+            let (b, a) = (before.get(place), after.get(place));
+            match (b, a) {
+                (Some(b), Some(a)) if b == a => continue,
+                (Some(_), Some(_)) => tally.change(Unit::Cell, 1),
+                (Some(_), None) => tally.remove(Unit::Cell, 1),
+                (None, Some(_)) => tally.add(Unit::Cell, 1),
+                (None, None) => continue,
+            }
+            cells.push(CellChange { at: *place, before: b.cloned(), after: a.cloned() });
+        }
+        let mark = if cells.is_empty() { Mark::Same } else { Mark::Changed };
+        marked.push(SheetChanges { name: sheet.name.clone(), mark, cells });
+    }
+    for sheet in old.iter().filter(|s| named(new, &s.name).is_none()) {
+        tally.remove(Unit::Sheet, 1);
+        marked.push(SheetChanges { name: sheet.name.clone(), mark: Mark::Removed, cells: Vec::new() });
+    }
+    let counts = tally.finish();
+    let outcome = if counts.is_empty() { Outcome::SameText } else { Outcome::Text };
+    Changes { outcome, counts, marked: Marked::Sheets(marked) }
 }
 
 /// A run of removed and added blocks: alike pairs become changed blocks, the rest stay removed
@@ -491,5 +548,73 @@ mod tests {
         let c = compare(&read(&before, "a.docx"), &read(&after, "a.docx"));
         assert_eq!(c.outcome, Outcome::Text);
         assert_eq!(c.counts, vec![count(Unit::Paragraph, 0, 0, 1)]);
+    }
+
+    fn sheet(name: &str, cells: &[(&str, &str)]) -> crate::Sheet {
+        crate::Sheet {
+            name: name.into(),
+            cells: cells.iter().map(|(a, v)| (crate::CellRef::parse(a).unwrap(), v.to_string())).collect(),
+        }
+    }
+
+    fn cell(a1: &str, before: Option<&str>, after: Option<&str>) -> CellChange {
+        CellChange {
+            at: crate::CellRef::parse(a1).unwrap(),
+            before: before.map(str::to_string),
+            after: after.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_changed_cell_shows_before_and_after() {
+        let before =
+            Reading::Sheets(vec![sheet("Costs", &[("C7", "1800"), ("C9", "10200"), ("A1", "Item")])]);
+        let after = Reading::Sheets(vec![sheet("Costs", &[("C9", "10800"), ("C7", "2400"), ("A1", "Item")])]);
+        let c = compare(&before, &after);
+        assert_eq!(c.counts, vec![count(Unit::Cell, 0, 0, 2)]);
+        assert_eq!(
+            c.marked,
+            Marked::Sheets(vec![SheetChanges {
+                name: "Costs".into(),
+                mark: Mark::Changed,
+                cells: vec![cell("C7", Some("1800"), Some("2400")), cell("C9", Some("10200"), Some("10800"))],
+            }])
+        );
+    }
+
+    #[test]
+    fn a_new_sheet_counts_as_one_sheet() {
+        let c = compare(
+            &Reading::Sheets(vec![sheet("A", &[("A1", "1")])]),
+            &Reading::Sheets(vec![sheet("A", &[("A1", "1")]), sheet("B", &[("A1", "x"), ("A2", "y")])]),
+        );
+        assert_eq!(c.counts, vec![count(Unit::Sheet, 1, 0, 0)]);
+        let Marked::Sheets(sheets) = &c.marked else { panic!() };
+        assert_eq!((sheets[1].mark, sheets[1].cells.len()), (Mark::Added, 0));
+    }
+
+    #[test]
+    fn a_removed_sheet_counts_as_one_sheet() {
+        let c = compare(
+            &Reading::Sheets(vec![sheet("A", &[]), sheet("Old", &[("A1", "1")])]),
+            &Reading::Sheets(vec![sheet("A", &[])]),
+        );
+        assert_eq!(c.counts, vec![count(Unit::Sheet, 0, 1, 0)]);
+    }
+
+    #[test]
+    fn cleared_and_filled_cells_are_removed_and_added() {
+        let c = compare(
+            &Reading::Sheets(vec![sheet("A", &[("A1", "1")])]),
+            &Reading::Sheets(vec![sheet("A", &[("B2", "2")])]),
+        );
+        assert_eq!(c.counts, vec![count(Unit::Cell, 1, 1, 0)]);
+    }
+
+    #[test]
+    fn equal_sheets_are_same_text() {
+        let r = Reading::Sheets(vec![sheet("A", &[("A1", "1")])]);
+        let c = compare(&r, &r);
+        assert_eq!((c.outcome, c.counts.len()), (Outcome::SameText, 0));
     }
 }
