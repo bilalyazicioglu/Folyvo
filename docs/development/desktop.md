@@ -40,6 +40,9 @@ CI fails when the generated files in `apps/desktop/ui/src/generated` differ from
 | `src-tauri/src/api.rs` | Everything the UI can ask for, as plain functions over the engine. |
 | `src-tauri/src/runtime.rs` | Owns the engine, one runner per watched folder, and the stream of events to the UI. |
 | `src-tauri/src/toggle.rs` | Decides what a click on the menu bar icon means, so the click that closes the popover does not reopen it. |
+| `crates/folyvo-compare` | Reads a saved file as text (plain text, Word, Excel, PDF page text) and says what was added, removed and changed between two of them. No platform code. |
+| `src-tauri/src/changes.rs` | Compares each new save with the one before it in the background and keeps the counts. |
+| `src-tauri/src/pdf.rs` | Reads each page's text of a PDF with PDFKit. |
 | `src-tauri/src/preview.rs` | Draws a picture of a saved version with Quick Look and finds the app that opens it. |
 | `src-tauri/src/fit.rs` | The popover's size: fixed width, height that follows its content. |
 | `src-tauri/src/intent.rs` | Reads a request from a `folyvo://intent` link or a Services entry and decides which window it opens. |
@@ -60,6 +63,16 @@ Folyvo's four actions (Browse All Versions…, Send a Copy…, Save a Copy…, W
 Both ask the app with a request that only ever opens a window: the file's versions window, or the popover's "which one is this?" answer for a file Folyvo did not save. Finder's items send a `folyvo://intent?kind=…&path=…` link. Any app or web page can open such a link, so Folyvo acts on one only for a file inside the home folder, checked from the path alone before it looks at the disk.
 
 To build only the extension: `bash apps/desktop/finder/build.sh`. Its test: `bash scripts/tests/finder-extension.test.sh`.
+
+## What changed between saves
+
+Every save after the first carries a short summary of what changed since the save before it, such as "2 paragraphs changed" or "3 cells changed". The versions window can also show a save's text with what was added, removed and changed marked.
+
+- **What is read.** Plain text by paragraph or line; Word documents (`.docx`) by paragraph and table cell, headers, footers and notes included; Excel workbooks (`.xlsx`) cell by cell, with the values Excel last saved; PDFs page by page, through PDFKit. Kinds are told apart by their content, because the vault keeps files without names. Anything else is only said to have changed.
+- **What is kept.** Only the counts, in `version_changes` and `version_change_counts` (schema v3). The marked text is worked out when the window asks for it (the `changes` command) and never stored.
+- **When.** One background thread in the app compares each save as it arrives, outside the engine's lock, so saving never waits. Saves made before this, or by `folyvo watch`, are compared when their file's versions window opens. A newer reader (`folyvo_compare::READER_VERSION`) compares everything again.
+- **Limits.** A file over 50 MB, a zip with more than 10,000 parts, a part over 32 MB or compressed more than 100 to 1, more than 4 MB of text, 200,000 cells, 500 PDF pages, XML nested deeper than 256 or any DTD, or more than 2 seconds of reading: the file is not read, and the summary says only "Changed".
+- **Words.** "Changed", "added", "removed". A save whose text is the same but whose bytes differ says so ("Same text, other changes"); one with exactly the same content as the save before says that instead.
 
 ## First launch
 
