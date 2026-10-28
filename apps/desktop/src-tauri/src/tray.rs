@@ -107,16 +107,42 @@ fn glass(_window: &tauri::WebviewWindow) {}
 
 /// Opens the versions window for an item, creating it the first time. `action` (`send` or `save`)
 /// asks the window to start Send a Copy or Save a Copy for the newest save once it has loaded.
+/// The label of the window that shows one file's saved times.
+pub const VERSIONS: &str = "versions";
+
+/// Whether Folyvo should be in the Dock and in Command-Tab: while a versions window is open, so a
+/// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
+pub fn in_dock<'a>(open: impl IntoIterator<Item = &'a str>, closing: Option<&str>) -> bool {
+    open.into_iter().any(|label| label == VERSIONS && closing != Some(VERSIONS))
+}
+
+/// Shows or hides Folyvo in the Dock and Command-Tab to match the windows open now.
+pub fn follow_windows(app: &AppHandle, closing: Option<&str>) {
+    #[cfg(target_os = "macos")]
+    {
+        let windows = app.webview_windows();
+        let policy = if in_dock(windows.keys().map(String::as_str), closing) {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, closing);
+}
+
 pub fn open_versions(app: &AppHandle, item: &str, action: Option<&str>) -> tauri::Result<()> {
     let action = action.map(|a| format!("&action={a}")).unwrap_or_default();
     let url = format!("index.html?view=versions&item={item}{action}");
-    if let Some(w) = app.get_webview_window("versions") {
+    if let Some(w) = app.get_webview_window(VERSIONS) {
         w.eval(format!("window.location.replace('/{url}')"))?;
         w.show()?;
         w.set_focus()?;
+        follow_windows(app, None);
         return Ok(());
     }
-    let builder = WebviewWindowBuilder::new(app, "versions", WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(app, VERSIONS, WebviewUrl::App(url.into()))
         .title("Versions")
         .inner_size(1100.0, 760.0)
         .min_inner_size(760.0, 520.0);
@@ -137,6 +163,8 @@ pub fn open_versions(app: &AppHandle, item: &str, action: Option<&str>) -> tauri
         window.set_size(tauri::PhysicalSize::new(size.width + 1, size.height))?;
         window.set_size(size)?;
     }
+    follow_windows(app, None);
+    window.set_focus()?;
     Ok(())
 }
 
@@ -178,4 +206,16 @@ pub fn show_which(app: &AppHandle, path: &std::path::Path) -> tauri::Result<()> 
     window.show()?;
     window.set_focus()?;
     app.emit_to("popover", "intent-which", ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folyvo_is_in_the_dock_only_while_a_versions_window_is_open() {
+        assert!(!in_dock(["popover"], None));
+        assert!(in_dock(["popover", VERSIONS], None));
+        assert!(!in_dock(["popover", VERSIONS], Some(VERSIONS)), "the window being closed no longer counts");
+    }
 }
