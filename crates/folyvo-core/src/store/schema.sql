@@ -56,3 +56,19 @@ CREATE TABLE watched_roots (
     path     TEXT    NOT NULL UNIQUE,
     added_at INTEGER NOT NULL
 );
+
+CREATE TABLE version_changes (
+    version_id  TEXT    PRIMARY KEY REFERENCES versions(id),
+    compared_to TEXT    REFERENCES versions(id),
+    outcome     TEXT    NOT NULL CHECK (outcome IN ('first', 'text', 'same_text', 'identical', 'unknown')),
+    reader      INTEGER NOT NULL
+);
+
+CREATE TABLE version_change_counts (
+    version_id  TEXT    NOT NULL REFERENCES version_changes(version_id),
+    unit        TEXT    NOT NULL CHECK (unit IN ('line', 'paragraph', 'cell', 'sheet', 'page')),
+    added       INTEGER NOT NULL DEFAULT 0,
+    removed     INTEGER NOT NULL DEFAULT 0,
+    changed     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (version_id, unit)
+);

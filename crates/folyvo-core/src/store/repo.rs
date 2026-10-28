@@ -2,7 +2,11 @@ use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::{CoreError, Result};
-use crate::model::{ContentHash, ItemId, ShareEvent, ShareEventKind, Version, VersionId, VersionOrigin};
+use crate::model::{
+    ChangeCount, ChangeOutcome, ChangeRecord, ChangeUnit, ContentHash, ItemId, ShareEvent, ShareEventKind,
+    Version, VersionId, VersionOrigin,
+};
+use std::collections::HashMap;
 
 const VERSION_COLS: &str = "id, item_id, seq, content_hash, size, created_at, origin, restored_from, note";
 
@@ -301,6 +305,113 @@ pub(crate) fn counts(c: &Connection) -> Result<(u64, u64, u64)> {
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
     Ok((i as u64, v as u64, b as u64))
+}
+
+/// The save of `item` right before `seq`, if any.
+pub(crate) fn version_before(c: &Connection, item: &ItemId, seq: i64) -> Result<Option<Version>> {
+    Ok(c.query_row(
+        &format!(
+            "SELECT {VERSION_COLS} FROM versions WHERE item_id = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT 1"
+        ),
+        params![item.as_str(), seq],
+        row_to_version,
+    )
+    .optional()?)
+}
+
+/// Replaces what is stored about `version`'s changes, counts included, in one transaction.
+pub(crate) fn store_change(c: &mut Connection, version: &VersionId, record: &ChangeRecord) -> Result<()> {
+    let tx = c.transaction()?;
+    tx.execute("DELETE FROM version_change_counts WHERE version_id = ?1", [version.as_str()])?;
+    tx.execute(
+        "INSERT OR REPLACE INTO version_changes(version_id, compared_to, outcome, reader) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            version.as_str(),
+            record.compared_to.as_ref().map(|v| v.as_str()),
+            record.outcome.as_str(),
+            record.reader
+        ],
+    )?;
+    for n in &record.counts {
+        tx.execute(
+            "INSERT INTO version_change_counts(version_id, unit, added, removed, changed) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![version.as_str(), n.unit.as_str(), n.added, n.removed, n.changed],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// What is stored about the changes in each save of `item`, by version.
+pub(crate) fn changes_for_item(c: &Connection, item: &ItemId) -> Result<HashMap<VersionId, ChangeRecord>> {
+    let mut records = HashMap::new();
+    let mut stmt = c.prepare(
+        "SELECT ch.version_id, ch.compared_to, ch.outcome, ch.reader FROM version_changes ch \
+         JOIN versions v ON v.id = ch.version_id WHERE v.item_id = ?1",
+    )?;
+    let rows = stmt.query_map([item.as_str()], |r| {
+        let id: String = r.get(0)?;
+        let before: Option<String> = r.get(1)?;
+        let outcome: String = r.get(2)?;
+        Ok((
+            VersionId::parse(&id).map_err(|e| conv(0, e))?,
+            ChangeRecord {
+                compared_to: before.map(|b| VersionId::parse(&b)).transpose().map_err(|e| conv(1, e))?,
+                outcome: ChangeOutcome::parse(&outcome).ok_or_else(|| bad_text(2, &outcome))?,
+                counts: Vec::new(),
+                reader: r.get(3)?,
+            },
+        ))
+    })?;
+    for row in rows {
+        let (id, record) = row?;
+        records.insert(id, record);
+    }
+    let mut stmt = c.prepare(
+        "SELECT n.version_id, n.unit, n.added, n.removed, n.changed FROM version_change_counts n \
+         JOIN versions v ON v.id = n.version_id WHERE v.item_id = ?1",
+    )?;
+    let rows = stmt.query_map([item.as_str()], |r| {
+        let id: String = r.get(0)?;
+        let unit: String = r.get(1)?;
+        Ok((
+            VersionId::parse(&id).map_err(|e| conv(0, e))?,
+            ChangeCount {
+                unit: ChangeUnit::parse(&unit).ok_or_else(|| bad_text(1, &unit))?,
+                added: r.get(2)?,
+                removed: r.get(3)?,
+                changed: r.get(4)?,
+            },
+        ))
+    })?;
+    for row in rows {
+        let (id, count) = row?;
+        if let Some(record) = records.get_mut(&id) {
+            record.counts.push(count);
+        }
+    }
+    for record in records.values_mut() {
+        record.counts.sort_by_key(|n| n.unit);
+    }
+    Ok(records)
+}
+
+/// Saves of `item` with nothing stored about their changes, or stored by a reader older than
+/// `reader`, newest first.
+pub(crate) fn needing_changes(c: &Connection, item: &ItemId, reader: i64) -> Result<Vec<VersionId>> {
+    let mut stmt = c.prepare(
+        "SELECT v.id FROM versions v LEFT JOIN version_changes ch ON ch.version_id = v.id \
+         WHERE v.item_id = ?1 AND (ch.version_id IS NULL OR ch.reader < ?2) ORDER BY v.seq DESC",
+    )?;
+    let rows = stmt.query_map(params![item.as_str(), reader], |r| {
+        let id: String = r.get(0)?;
+        VersionId::parse(&id).map_err(|e| conv(0, e))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn bad_text(col: usize, value: &str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(col, Type::Text, format!("unexpected value {value:?}").into())
 }
 
 #[cfg(test)]

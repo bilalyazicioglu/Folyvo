@@ -15,6 +15,7 @@ use crate::ignore::{is_ignored, is_ignored_under};
 use crate::ingest::{IngestOutcome, Ingestor};
 use crate::lock::VaultLock;
 use crate::model::{version_codes, ContentHash, ItemId, ShareEvent, Version, VersionId, VersionOrigin};
+use crate::model::{ChangeOutcome, ChangeRecord};
 use crate::ports::{Clock, IdGen};
 use crate::reconcile;
 use crate::restore::Restorer;
@@ -50,6 +51,23 @@ pub enum EngineEvent {
         item: ItemId,
     },
     RootsChanged,
+    /// What changed in a save is now known (see `store_change`).
+    ChangesReady {
+        item: ItemId,
+        version: VersionId,
+    },
+}
+
+/// What comparing one save with the save before it needs. Paths point into the vault.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompareInputs {
+    pub item: ItemId,
+    pub version: VersionId,
+    pub after: PathBuf,
+    pub after_hash: ContentHash,
+    pub before: Option<(VersionId, PathBuf, ContentHash)>,
+    /// The file's name, which says how plain text should be read.
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +91,8 @@ pub struct VersionView {
     pub note: Option<String>,
     /// Short code for this version, unique within its item (see `model::version_codes`).
     pub code: String,
+    /// What changed since the save before, once it has been worked out.
+    pub change: Option<ChangeRecord>,
 }
 
 /// One save: a version of an item and when it was made.
@@ -93,11 +113,13 @@ pub struct VaultStats {
 /// An item's versions, newest first, each with its short code.
 pub(crate) fn version_views(c: &rusqlite::Connection, item: &ItemId) -> Result<Vec<VersionView>> {
     let versions = repo::versions_newest_first(c, item)?;
+    let mut changes = repo::changes_for_item(c, item)?;
     let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
     Ok(versions
         .into_iter()
         .zip(codes)
         .map(|(v, code)| VersionView {
+            change: changes.remove(&v.id),
             code,
             id: v.id,
             seq: v.seq,
@@ -412,6 +434,50 @@ impl Engine {
     pub fn materialise(&self, item: &ItemId, version: &VersionId) -> Result<PathBuf> {
         let g = self.lock();
         handed::materialise(&g.store, &g.cas, item, version)
+    }
+
+    /// The two stored files a comparison of `version` needs: it and the save before it, read
+    /// straight from the vault, never from the working file.
+    pub fn compare_inputs(&self, version: &VersionId) -> Result<CompareInputs> {
+        let g = self.lock();
+        let c = g.store.conn();
+        let v = repo::version(c, version)?.ok_or_else(|| CoreError::VersionMissing(version.clone()))?;
+        let name = repo::display_name(c, &v.item_id)?.unwrap_or_default();
+        let before = repo::version_before(c, &v.item_id, v.seq)?
+            .map(|b| (b.id, g.cas.path_of(&b.content_hash), b.content_hash));
+        Ok(CompareInputs {
+            after: g.cas.path_of(&v.content_hash),
+            after_hash: v.content_hash,
+            item: v.item_id,
+            version: v.id,
+            before,
+            name,
+        })
+    }
+
+    /// Keep what changed in `version`, replacing anything kept before, and announce it.
+    pub fn store_change(&self, version: &VersionId, record: &ChangeRecord) -> Result<()> {
+        if (record.outcome == ChangeOutcome::Text) == record.counts.is_empty() {
+            return Err(CoreError::BadChange(format!(
+                "{:?} with {} counts",
+                record.outcome,
+                record.counts.len()
+            )));
+        }
+        let mut g = self.lock();
+        let item = repo::version(g.store.conn(), version)?
+            .ok_or_else(|| CoreError::VersionMissing(version.clone()))?
+            .item_id;
+        repo::store_change(g.store.conn_mut(), version, record)?;
+        drop(g);
+        self.emit(EngineEvent::ChangesReady { item, version: version.clone() });
+        Ok(())
+    }
+
+    /// Saves of `item` whose changes are not known yet, or were worked out by a reader older than
+    /// `reader`, newest first.
+    pub fn versions_needing_changes(&self, item: &ItemId, reader: i64) -> Result<Vec<VersionId>> {
+        repo::needing_changes(self.lock().store.conn(), item, reader)
     }
 
     /// Record that `version` was handed to another app (`service`: see `handed::validate_service`).
@@ -937,5 +1003,114 @@ mod tests {
         let p = t.file("a.docx", b"stored");
         let v = t.save(&p, b"stored");
         assert_eq!(fs::read(t.engine.object_path(&v.content_hash)).unwrap(), b"stored");
+    }
+
+    use crate::model::{ChangeCount, ChangeUnit};
+
+    fn text_change(counts: Vec<ChangeCount>) -> ChangeRecord {
+        ChangeRecord { compared_to: None, outcome: ChangeOutcome::Text, counts, reader: 1 }
+    }
+
+    #[test]
+    fn stored_changes_come_back_with_history() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v1 = t.save(&p, b"one");
+        let v2 = t.save(&p, b"two");
+        let record = ChangeRecord {
+            compared_to: Some(v1.id.clone()),
+            outcome: ChangeOutcome::Text,
+            counts: vec![
+                ChangeCount { unit: ChangeUnit::Paragraph, added: 0, removed: 0, changed: 2 },
+                ChangeCount { unit: ChangeUnit::Cell, added: 0, removed: 0, changed: 1 },
+            ],
+            reader: 1,
+        };
+        t.engine.store_change(&v2.id, &record).unwrap();
+        let h = t.engine.history(&v1.item_id).unwrap();
+        assert_eq!(h[0].change.as_ref(), Some(&record));
+        assert_eq!(h[1].change, None);
+    }
+
+    #[test]
+    fn storing_again_replaces_the_counts() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        let one = |unit| vec![ChangeCount { unit, added: 1, removed: 0, changed: 0 }];
+        t.engine.store_change(&v.id, &text_change(one(ChangeUnit::Line))).unwrap();
+        t.engine.store_change(&v.id, &text_change(one(ChangeUnit::Page))).unwrap();
+        let h = t.engine.history(&v.item_id).unwrap();
+        assert_eq!(h[0].change.as_ref().unwrap().counts, one(ChangeUnit::Page));
+    }
+
+    #[test]
+    fn storing_announces_changes_ready() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        t.events();
+        let first =
+            ChangeRecord { compared_to: None, outcome: ChangeOutcome::First, counts: vec![], reader: 1 };
+        t.engine.store_change(&v.id, &first).unwrap();
+        assert_eq!(
+            t.events(),
+            vec![EngineEvent::ChangesReady { item: v.item_id.clone(), version: v.id.clone() }]
+        );
+    }
+
+    #[test]
+    fn a_text_outcome_needs_counts() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v = t.save(&p, b"one");
+        assert!(matches!(t.engine.store_change(&v.id, &text_change(vec![])), Err(CoreError::BadChange(_))));
+        let missing = VersionId::from_suffix("dead");
+        let first =
+            ChangeRecord { compared_to: None, outcome: ChangeOutcome::First, counts: vec![], reader: 1 };
+        assert!(matches!(t.engine.store_change(&missing, &first), Err(CoreError::VersionMissing(_))));
+    }
+
+    #[test]
+    fn compare_inputs_name_the_save_before() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v1 = t.save(&p, b"one");
+        let v2 = t.save(&p, b"two");
+        let v3 = t.save(&p, b"three");
+        let first = t.engine.compare_inputs(&v1.id).unwrap();
+        assert!(first.before.is_none());
+        assert_eq!(fs::read(&first.after).unwrap(), b"one");
+        let third = t.engine.compare_inputs(&v3.id).unwrap();
+        let (before_id, before_path, before_hash) = third.before.unwrap();
+        assert_eq!((before_id, before_hash), (v2.id.clone(), v2.content_hash.clone()));
+        assert_eq!(fs::read(before_path).unwrap(), b"two");
+        assert_eq!(
+            (third.item, third.version, third.after_hash),
+            (v3.item_id.clone(), v3.id.clone(), v3.content_hash)
+        );
+        assert_eq!(third.name, "a.docx");
+    }
+
+    #[test]
+    fn needing_changes_lists_missing_and_old_readers_newest_first() {
+        let mut t = setup();
+        let p = t.file("a.docx", b"one");
+        let v1 = t.save(&p, b"one");
+        let v2 = t.save(&p, b"two");
+        let v3 = t.save(&p, b"three");
+        let first = |reader| ChangeRecord {
+            compared_to: None,
+            outcome: ChangeOutcome::First,
+            counts: vec![],
+            reader,
+        };
+        t.engine.store_change(&v1.id, &first(1)).unwrap();
+        t.engine.store_change(&v2.id, &first(2)).unwrap();
+        assert_eq!(
+            t.engine.versions_needing_changes(&v1.item_id, 2).unwrap(),
+            vec![v3.id.clone(), v1.id.clone()]
+        );
+        assert_eq!(t.engine.versions_needing_changes(&v1.item_id, 1).unwrap(), vec![v3.id]);
     }
 }

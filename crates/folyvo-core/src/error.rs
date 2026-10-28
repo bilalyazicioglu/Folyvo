@@ -41,6 +41,8 @@ pub enum CoreError {
     PathTaken(PathBuf),
     #[error("could not watch the folder: {0}")]
     Watch(String),
+    #[error("a change record cannot be stored: {0}")]
+    BadChange(String),
     #[error("vault data is inconsistent: {0}")]
     Corrupt(String),
 }
