@@ -12,12 +12,19 @@ pub fn page_texts(path: &Path, limits: &Limits) -> Result<Vec<String>, Unreadabl
     page_texts_up_to(path, limits, MAX_PAGES)
 }
 
+/// Runs inside its own autorelease pool: the worker and the command pool are long-lived threads
+/// with no run loop, so what PDFKit autoreleases would otherwise never be freed.
 #[cfg(target_os = "macos")]
 pub(crate) fn page_texts_up_to(
     path: &Path,
     limits: &Limits,
     max_pages: usize,
 ) -> Result<Vec<String>, Unreadable> {
+    objc2::rc::autoreleasepool(|_| read_pages(path, limits, max_pages))
+}
+
+#[cfg(target_os = "macos")]
+fn read_pages(path: &Path, limits: &Limits, max_pages: usize) -> Result<Vec<String>, Unreadable> {
     use objc2::AnyThread;
     use objc2_foundation::{NSString, NSURL};
     use objc2_pdf_kit::PDFDocument;
