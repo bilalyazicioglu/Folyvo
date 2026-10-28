@@ -75,11 +75,20 @@ const ALIKE_LETTERS: f32 = 0.6;
 const SHORT: usize = 200;
 /// How far ahead a removed block looks for an added one it is like.
 const LOOK_AHEAD: usize = 20;
+/// Text longer than this (in bytes) is never paired as changed: comparing it word by word costs too
+/// much. A long paragraph that did not change still matches as the same.
+const LONG: usize = 16 * 1024;
 
 pub fn compare(before: &Reading, after: &Reading) -> Changes {
+    compare_until(before, after, Instant::now() + DEADLINE)
+}
+
+/// `compare` with one deadline for all of it: once it passes, nothing more is paired up, so
+/// what is left counts as removed and added.
+pub(crate) fn compare_until(before: &Reading, after: &Reading, deadline: Instant) -> Changes {
     match (before, after) {
         (Reading::Text { unit: a, blocks: old }, Reading::Text { unit: b, blocks: new }) if a == b => {
-            compare_text(*a, old, new)
+            compare_text(*a, old, new, deadline)
         }
         _ => Changes { outcome: Outcome::Unknown, counts: Vec::new(), marked: Marked::Nothing },
     }
@@ -139,22 +148,17 @@ fn key(b: &Block) -> Key {
     }
 }
 
-fn compare_text(unit: Unit, old: &[Block], new: &[Block]) -> Changes {
+fn compare_text(unit: Unit, old: &[Block], new: &[Block], deadline: Instant) -> Changes {
     let (old_keys, new_keys): (Vec<Key>, Vec<Key>) =
         (old.iter().map(key).collect(), new.iter().map(key).collect());
-    let ops = capture_diff_slices_deadline(
-        Algorithm::Patience,
-        &old_keys,
-        &new_keys,
-        Some(Instant::now() + DEADLINE),
-    );
+    let ops = capture_diff_slices_deadline(Algorithm::Patience, &old_keys, &new_keys, Some(deadline));
     let mut tally = Tally::default();
     let mut marked = Vec::new();
     for op in ops {
         let (_, o, n) = op.as_tag_tuple();
         match op {
             DiffOp::Equal { .. } => marked.extend(new[n].iter().map(|b| same(b, Mark::Same))),
-            _ => pair_up(unit, &old[o], &new[n], &mut tally, &mut marked),
+            _ => pair_up(unit, &old[o], &new[n], deadline, &mut tally, &mut marked),
         }
     }
     let counts = tally.finish();
@@ -164,14 +168,21 @@ fn compare_text(unit: Unit, old: &[Block], new: &[Block]) -> Changes {
 
 /// A run of removed and added blocks: alike pairs become changed blocks, the rest stay removed
 /// or added, in order.
-fn pair_up(unit: Unit, old: &[Block], new: &[Block], tally: &mut Tally, out: &mut Vec<MarkedBlock>) {
+fn pair_up(
+    unit: Unit,
+    old: &[Block],
+    new: &[Block],
+    deadline: Instant,
+    tally: &mut Tally,
+    out: &mut Vec<MarkedBlock>,
+) {
     let (mut i, mut j) = (0, 0);
     while i < old.len() || j < new.len() {
-        if i < old.len() && j < new.len() && alike(&old[i], &new[j]) {
-            out.push(changed(unit, &old[i], &new[j], tally));
+        if i < old.len() && j < new.len() && alike(&old[i], &new[j], deadline) {
+            out.push(changed(unit, &old[i], &new[j], deadline, tally));
             i += 1;
             j += 1;
-        } else if i < old.len() && new[j..].iter().take(LOOK_AHEAD).any(|b| alike(&old[i], b)) {
+        } else if i < old.len() && new[j..].iter().take(LOOK_AHEAD).any(|b| alike(&old[i], b, deadline)) {
             out.push(added(unit, &new[j], tally));
             j += 1;
         } else if i < old.len() {
@@ -184,10 +195,13 @@ fn pair_up(unit: Unit, old: &[Block], new: &[Block], tally: &mut Tally, out: &mu
     }
 }
 
-fn alike(a: &Block, b: &Block) -> bool {
+fn alike(a: &Block, b: &Block, deadline: Instant) -> bool {
+    if Instant::now() >= deadline {
+        return false;
+    }
     match (a, b) {
         (Block::Paragraph { section: s1, text: t1, .. }, Block::Paragraph { section: s2, text: t2, .. }) => {
-            s1 == s2 && similar_text(t1, t2)
+            s1 == s2 && similar_text(t1, t2, deadline)
         }
         (Block::Table { section: s1, rows: r1 }, Block::Table { section: s2, rows: r2 }) => {
             s1 == s2 && r1.len() == r2.len() && r1.iter().zip(r2).all(|(a, b)| a.len() == b.len())
@@ -197,10 +211,13 @@ fn alike(a: &Block, b: &Block) -> bool {
 }
 
 /// Alike by words, or, for short runs of text without spaces such as `y,2` and `y,3`, by letters.
-fn similar_text(a: &str, b: &str) -> bool {
+fn similar_text(a: &str, b: &str, deadline: Instant) -> bool {
+    if a.len().max(b.len()) > LONG {
+        return false;
+    }
     let config = || {
         let mut c = TextDiff::configure();
-        c.algorithm(Algorithm::Patience).timeout(DEADLINE);
+        c.algorithm(Algorithm::Patience).deadline(deadline);
         c
     };
     config().diff_words(a, b).ratio() >= ALIKE
@@ -250,7 +267,7 @@ fn same(b: &Block, mark: Mark) -> MarkedBlock {
 }
 
 /// Two alike blocks: a paragraph marked word by word, or a table cell by cell.
-fn changed(unit: Unit, old: &Block, new: &Block, tally: &mut Tally) -> MarkedBlock {
+fn changed(unit: Unit, old: &Block, new: &Block, deadline: Instant, tally: &mut Tally) -> MarkedBlock {
     match (old, new) {
         (Block::Paragraph { text: a, .. }, Block::Paragraph { section, style, text: b }) => {
             tally.change(unit, 1);
@@ -258,7 +275,7 @@ fn changed(unit: Unit, old: &Block, new: &Block, tally: &mut Tally) -> MarkedBlo
                 section: *section,
                 style: *style,
                 mark: Mark::Changed,
-                spans: words(a, b),
+                spans: words(a, b, deadline),
             }
         }
         (Block::Table { rows: a, .. }, Block::Table { section, rows: b }) => {
@@ -273,7 +290,7 @@ fn changed(unit: Unit, old: &Block, new: &Block, tally: &mut Tally) -> MarkedBlo
                                 MarkedCell { mark: Mark::Same, spans: vec![Span::Same(cb.clone())] }
                             } else {
                                 tally.change(Unit::Cell, 1);
-                                MarkedCell { mark: Mark::Changed, spans: words(ca, cb) }
+                                MarkedCell { mark: Mark::Changed, spans: words(ca, cb, deadline) }
                             }
                         })
                         .collect()
@@ -291,9 +308,9 @@ fn changed(unit: Unit, old: &Block, new: &Block, tally: &mut Tally) -> MarkedBlo
 }
 
 /// `after`'s words, with those not in `before` added and those gone shown removed.
-pub(crate) fn words(before: &str, after: &str) -> Vec<Span> {
+pub(crate) fn words(before: &str, after: &str, deadline: Instant) -> Vec<Span> {
     let diff =
-        TextDiff::configure().algorithm(Algorithm::Patience).timeout(DEADLINE).diff_words(before, after);
+        TextDiff::configure().algorithm(Algorithm::Patience).deadline(deadline).diff_words(before, after);
     let mut spans: Vec<Span> = Vec::new();
     for change in diff.iter_all_changes() {
         let text = change.value();
@@ -442,6 +459,21 @@ mod tests {
             &Reading::Text { unit: Unit::Paragraph, blocks: vec![para(Section::Body, "Page 1")] },
             &Reading::Text { unit: Unit::Paragraph, blocks: vec![para(Section::Footer, "Page 1")] },
         );
+        assert_eq!(c.counts, vec![count(Unit::Paragraph, 1, 1, 0)]);
+    }
+
+    #[test]
+    fn past_the_deadline_nothing_more_is_paired() {
+        let before = text(Unit::Paragraph, &["Support, 12 months"]);
+        let after = text(Unit::Paragraph, &["Support, 18 months"]);
+        let c = compare_until(&before, &after, Instant::now());
+        assert_eq!(c.counts, vec![count(Unit::Paragraph, 1, 1, 0)]);
+    }
+
+    #[test]
+    fn a_long_paragraph_is_only_alike_when_unchanged() {
+        let long = "word ".repeat(5_000);
+        let c = compare(&text(Unit::Paragraph, &[&long]), &text(Unit::Paragraph, &[&format!("{long}more")]));
         assert_eq!(c.counts, vec![count(Unit::Paragraph, 1, 1, 0)]);
     }
 
