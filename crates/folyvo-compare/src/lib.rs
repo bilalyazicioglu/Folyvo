@@ -3,6 +3,7 @@
 
 mod archive;
 mod compare;
+mod excel;
 
 mod budget;
 mod reading;
@@ -51,7 +52,11 @@ pub fn read_with(path: &Path, name_hint: &str, limits: &Limits) -> Reading {
             Ok(mut zip) => word::read_word(&mut zip, &mut budget),
             Err(why) => Reading::Unreadable(why),
         },
-        Kind::Excel | Kind::Pdf | Kind::Other => Reading::Unreadable(Unreadable::NotSupported),
+        Kind::Excel => match archive::Archive::open(path, limits) {
+            Ok(mut zip) => excel::read_excel(&mut zip, &mut budget),
+            Err(why) => Reading::Unreadable(why),
+        },
+        Kind::Pdf | Kind::Other => Reading::Unreadable(Unreadable::NotSupported),
     }
 }
 
