@@ -107,7 +107,17 @@ impl ChangeWorker {
         let thread = std::thread::spawn(move || {
             while let Some(version) = next(&work) {
                 let Ok(inputs) = engine.compare_inputs(&version) else { continue };
-                let record = summarise(&inputs);
+                // Kept as unknown before the files are read: if reading one brings the app down,
+                // the next launch does not read it again. A reader that panics leaves it so too.
+                let unknown = ChangeRecord {
+                    compared_to: inputs.before.as_ref().map(|(id, _, _)| id.clone()),
+                    outcome: ChangeOutcome::Unknown,
+                    counts: Vec::new(),
+                    reader: folyvo_compare::READER_VERSION,
+                };
+                let _ = engine.store_change(&version, &unknown);
+                let record = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| summarise(&inputs)))
+                    .unwrap_or(unknown);
                 if let Err(e) = engine.store_change(&version, &record) {
                     eprintln!("folyvo: could not keep what changed in {version}: {e}");
                 }
@@ -126,13 +136,13 @@ impl ChangeWorker {
 }
 
 impl Drop for ChangeWorker {
+    /// Asks the thread to stop after its current job, without waiting: a reading stuck in a
+    /// system framework must not keep the app from quitting.
     fn drop(&mut self) {
         let (lock, wake) = &*self.queue;
-        lock.lock().unwrap().stop = true;
+        lock.lock().unwrap_or_else(|p| p.into_inner()).stop = true;
         wake.notify_all();
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        self.thread.take();
     }
 }
 
@@ -361,6 +371,51 @@ pub(crate) mod tests {
         let at = Instant::now();
         save(&f, "n.txt", b"two");
         assert!(at.elapsed() < Duration::from_secs(1), "saving waited {:?}", at.elapsed());
+    }
+
+    #[test]
+    fn a_save_being_compared_is_not_asked_for_again() {
+        let f = engine();
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = started.clone();
+        let slow: Summarise = Arc::new(move |i: &CompareInputs| {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(500));
+            summarise(i)
+        });
+        let _worker = ChangeWorker::start_with(f.engine.clone(), slow);
+        let v = save(&f, "n.txt", b"one");
+        wait_until("the comparison to start", || started.load(std::sync::atomic::Ordering::SeqCst));
+        // If reading this file brought the app down now, the next launch must not read it again.
+        assert_eq!(
+            f.engine.versions_needing_changes(&v.item_id, folyvo_compare::READER_VERSION).unwrap(),
+            vec![]
+        );
+        wait_until("the real result", || {
+            f.engine.history(&v.item_id).unwrap()[0]
+                .change
+                .as_ref()
+                .is_some_and(|c| c.outcome == ChangeOutcome::First)
+        });
+    }
+
+    #[test]
+    fn a_comparison_that_panics_leaves_the_worker_running() {
+        let f = engine();
+        let picky: Summarise = Arc::new(|i: &CompareInputs| {
+            if i.name == "bad.txt" {
+                panic!("a reader bug");
+            }
+            summarise(i)
+        });
+        let _worker = ChangeWorker::start_with(f.engine.clone(), picky);
+        let bad = save(&f, "bad.txt", b"x");
+        let good = save(&f, "good.txt", b"y");
+        wait_until("the good file to be compared", || {
+            f.engine.history(&good.item_id).unwrap()[0].change.is_some()
+        });
+        let kept = f.engine.history(&bad.item_id).unwrap()[0].change.clone().unwrap();
+        assert_eq!(kept.outcome, ChangeOutcome::Unknown);
     }
 
     #[test]
