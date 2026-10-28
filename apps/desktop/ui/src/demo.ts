@@ -28,6 +28,7 @@ export function demoHandlers() {
     contentHash: `b3_${seq}`,
     origin: "auto",
     note: null,
+    change: null,
     ...extra,
   });
   const histories: Record<string, VersionDto[]> = {

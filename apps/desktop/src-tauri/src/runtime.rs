@@ -9,6 +9,7 @@ use folyvo_core::runner::{OnApplied, Runner};
 use folyvo_core::watch::Applied;
 
 use crate::api::AppApi;
+use crate::changes::ChangeWorker;
 use crate::dto::{EngineEventDto, FolderDto};
 use crate::errors::UserError;
 
@@ -23,6 +24,7 @@ pub struct AppRuntime {
     quiet: (i64, i64),
     runners: Mutex<HashMap<PathBuf, Runner>>,
     problems: Mutex<HashMap<PathBuf, UserError>>,
+    changes: ChangeWorker,
 }
 
 impl AppRuntime {
@@ -46,6 +48,7 @@ impl AppRuntime {
         });
 
         let runtime = Arc::new(AppRuntime {
+            changes: ChangeWorker::start(engine.clone()),
             engine,
             clock,
             quiet,
@@ -62,6 +65,13 @@ impl AppRuntime {
 
     pub fn api(&self) -> AppApi {
         AppApi::new(self.engine.clone())
+    }
+
+    /// Asks for the saves of `item` that are not compared yet to be compared first.
+    pub fn backfill(&self, item: &str) {
+        if let Ok(item) = folyvo_core::model::ItemId::parse(item) {
+            self.changes.backfill(&self.engine, &item);
+        }
     }
 
     pub fn add_folder(&self, folder: &Path) -> Result<(), UserError> {

@@ -1,5 +1,6 @@
 pub const APP_NAME: &str = "Folyvo";
 pub mod api;
+pub mod changes;
 pub mod commands;
 pub mod dto;
 pub mod errors;
