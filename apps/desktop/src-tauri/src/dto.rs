@@ -1,6 +1,8 @@
 use folyvo_core::engine::{EngineEvent, ItemSummary, Save, VaultStats, VersionView};
 use folyvo_core::export::ExportResult;
-use folyvo_core::model::{ShareEvent, ShareEventKind, Version, VersionOrigin};
+use folyvo_core::model::{
+    ChangeOutcome, ChangeRecord, ChangeUnit, ShareEvent, ShareEventKind, Version, VersionOrigin,
+};
 use folyvo_core::which::Match;
 use serde::Serialize;
 use ts_rs::TS;
@@ -66,6 +68,81 @@ pub struct VersionDto {
     pub origin: OriginDto,
     pub note: Option<String>,
     pub code: String,
+    /// What changed since the save before; none until it has been worked out.
+    pub change: Option<ChangeDto>,
+}
+
+/// What changed in a save, as counts the UI turns into words ("3 cells changed").
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChangeDto {
+    pub outcome: ChangeOutcomeDto,
+    pub counts: Vec<ChangeCountDto>,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ChangeOutcomeDto {
+    First,
+    Text,
+    SameText,
+    Identical,
+    Unknown,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ChangeUnitDto {
+    Line,
+    Paragraph,
+    Cell,
+    Sheet,
+    Page,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChangeCountDto {
+    pub unit: ChangeUnitDto,
+    pub added: u32,
+    pub removed: u32,
+    pub changed: u32,
+}
+
+impl From<ChangeRecord> for ChangeDto {
+    fn from(r: ChangeRecord) -> Self {
+        let outcome = match r.outcome {
+            ChangeOutcome::First => ChangeOutcomeDto::First,
+            ChangeOutcome::Text => ChangeOutcomeDto::Text,
+            ChangeOutcome::SameText => ChangeOutcomeDto::SameText,
+            ChangeOutcome::Identical => ChangeOutcomeDto::Identical,
+            ChangeOutcome::Unknown => ChangeOutcomeDto::Unknown,
+        };
+        let unit = |u| match u {
+            ChangeUnit::Line => ChangeUnitDto::Line,
+            ChangeUnit::Paragraph => ChangeUnitDto::Paragraph,
+            ChangeUnit::Cell => ChangeUnitDto::Cell,
+            ChangeUnit::Sheet => ChangeUnitDto::Sheet,
+            ChangeUnit::Page => ChangeUnitDto::Page,
+        };
+        ChangeDto {
+            outcome,
+            counts: r
+                .counts
+                .into_iter()
+                .map(|c| ChangeCountDto {
+                    unit: unit(c.unit),
+                    added: c.added,
+                    removed: c.removed,
+                    changed: c.changed,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<VersionView> for VersionDto {
@@ -79,6 +156,7 @@ impl From<VersionView> for VersionDto {
             origin: v.origin.into(),
             note: v.note,
             code: v.code,
+            change: v.change.map(ChangeDto::from),
         }
     }
 }
@@ -368,5 +446,49 @@ mod tests {
             json!({"itemId": "itm_01", "versionId": "ver_02", "kind": "handed", "service": "mail", "targetPath": null, "at": 5})
         );
         assert_eq!(serde_json::to_value(CopyKind::Saved).unwrap(), json!("saved"));
+    }
+
+    #[test]
+    fn a_version_carries_its_change_in_camel_case() {
+        use folyvo_core::model::{ChangeCount, ChangeOutcome, ChangeRecord, ChangeUnit};
+        let view = |change| VersionView {
+            id: VersionId::from_suffix("0a"),
+            seq: 2,
+            created_at: 1,
+            size: 1,
+            content_hash: ContentHash::of_bytes(b"x"),
+            origin: VersionOrigin::Auto,
+            note: None,
+            code: "0a".into(),
+            change,
+        };
+        let same =
+            ChangeRecord { compared_to: None, outcome: ChangeOutcome::SameText, counts: vec![], reader: 1 };
+        let json = serde_json::to_value(VersionDto::from(view(Some(same)))).unwrap();
+        assert_eq!(json["change"], json!({"outcome": "sameText", "counts": []}));
+        let text = ChangeRecord {
+            compared_to: None,
+            outcome: ChangeOutcome::Text,
+            counts: vec![ChangeCount { unit: ChangeUnit::Cell, added: 0, removed: 1, changed: 3 }],
+            reader: 1,
+        };
+        let json = serde_json::to_value(VersionDto::from(view(Some(text)))).unwrap();
+        assert_eq!(
+            json["change"],
+            json!({"outcome": "text", "counts": [{"unit": "cell", "added": 0, "removed": 1, "changed": 3}]})
+        );
+        assert_eq!(serde_json::to_value(VersionDto::from(view(None))).unwrap()["change"], json!(null));
+    }
+
+    #[test]
+    fn changes_ready_is_tagged() {
+        let e = EngineEventDto::from(EngineEvent::ChangesReady {
+            item: ItemId::from_suffix("01"),
+            version: VersionId::from_suffix("02"),
+        });
+        assert_eq!(
+            serde_json::to_value(e).unwrap(),
+            json!({"kind": "changesReady", "itemId": "itm_01", "versionId": "ver_02"})
+        );
     }
 }

@@ -29,6 +29,7 @@ export function version(over: Partial<VersionDto> = {}): VersionDto {
     contentHash: "b3_00",
     origin: "auto",
     note: null,
+    change: null,
     ...over,
   };
 }

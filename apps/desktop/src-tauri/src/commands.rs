@@ -33,7 +33,13 @@ pub async fn item(rt: Rt<'_>, item: String) -> Result<ItemSummaryDto, UserError>
 #[tauri::command]
 pub async fn history(rt: Rt<'_>, item: String) -> Result<Vec<VersionDto>, UserError> {
     let api = rt.api();
-    blocking(move || api.history(&item)).await
+    let runtime = rt.inner().clone();
+    blocking(move || {
+        let history = api.history(&item)?;
+        runtime.backfill(&item);
+        Ok(history)
+    })
+    .await
 }
 
 #[tauri::command]
