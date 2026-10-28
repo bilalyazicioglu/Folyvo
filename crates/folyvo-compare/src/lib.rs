@@ -22,7 +22,7 @@ pub use budget::Limits;
 pub use compare::{
     compare, Changes, Count, Mark, Marked, MarkedBlock, MarkedCell, Outcome, PageChanges, Span,
 };
-pub use pdf::{is_pdf, pdf_reading};
+pub use pdf::{is_pdf, pdf_reading, same_kind};
 pub use reading::{Block, CellRef, ParaStyle, Reading, Section, Sheet, Unit, Unreadable};
 use sniff::Kind;
 

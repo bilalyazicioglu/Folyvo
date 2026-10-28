@@ -33,6 +33,9 @@ pub fn summarise(inputs: &CompareInputs) -> ChangeRecord {
     if *before_hash == inputs.after_hash {
         return ChangeRecord { compared_to, outcome: ChangeOutcome::Identical, counts: Vec::new(), reader };
     }
+    if !folyvo_compare::same_kind(before_path, &inputs.after, &inputs.name) {
+        return ChangeRecord { compared_to, outcome: ChangeOutcome::Unknown, counts: Vec::new(), reader };
+    }
     let changes = folyvo_compare::compare(
         &reading_of(before_path, &inputs.name),
         &reading_of(&inputs.after, &inputs.name),
@@ -276,6 +279,14 @@ pub(crate) mod tests {
         let a = docx(d.path(), "a", &["Proposal"]);
         let b = file(d.path(), "b", b"Proposal");
         assert_eq!(summarise(&inputs(Some(&a), &b, "Proposal.docx")).outcome, ChangeOutcome::Unknown);
+    }
+
+    #[test]
+    fn a_word_file_replaced_by_plain_text_is_unknown() {
+        let d = tempfile::tempdir().unwrap();
+        let a = docx(d.path(), "a", &["Proposal"]);
+        let b = file(d.path(), "b", b"Proposal, rewritten");
+        assert_eq!(summarise(&inputs(Some(&a), &b, "Proposal.txt")).outcome, ChangeOutcome::Unknown);
     }
 
     #[test]

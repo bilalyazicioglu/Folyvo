@@ -135,6 +135,9 @@ impl AppApi {
         let changes = match &inputs.before {
             None => folyvo_compare::compare(&after, &after),
             Some((_, _, hash)) if *hash == inputs.after_hash => return Ok(MarkedPageDto::Identical),
+            Some((_, path, _)) if !folyvo_compare::same_kind(path, &inputs.after, &inputs.name) => {
+                return Ok(MarkedPageDto::Unreadable)
+            }
             Some((_, path, _)) => {
                 folyvo_compare::compare(&crate::changes::reading_of(path, &inputs.name), &after)
             }

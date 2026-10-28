@@ -16,6 +16,12 @@ pub fn pdf_reading(pages: Vec<String>, limits: &Limits) -> Reading {
     Reading::Pages(out)
 }
 
+/// Whether two files are the same kind of document (Word, Excel, PDF, the same kind of text),
+/// judged as `read` judges them. Two different kinds are never compared.
+pub fn same_kind(a: &std::path::Path, b: &std::path::Path, name_hint: &str) -> bool {
+    crate::sniff::sniff(a, name_hint) == crate::sniff::sniff(b, name_hint)
+}
+
 /// Whether the file at `path` is a PDF, by its first bytes.
 pub fn is_pdf(path: &std::path::Path) -> bool {
     crate::sniff::sniff(path, "") == crate::sniff::Kind::Pdf
