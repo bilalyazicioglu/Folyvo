@@ -35,12 +35,18 @@ pub(crate) fn page_texts_up_to(
         return Err(Unreadable::TooLarge);
     }
     let mut pages = Vec::with_capacity(count);
+    let mut text_bytes = 0;
     for i in 0..count {
         if started.elapsed() > limits.time {
             return Err(Unreadable::TooSlow);
         }
         // SAFETY: `i` is below the page count.
         let text = unsafe { doc.pageAtIndex(i).and_then(|p| p.string()) };
+        // Measured before it is copied out, so the text kept never passes the limit.
+        text_bytes += text.as_ref().map_or(0, |t| t.len());
+        if text_bytes > limits.text_bytes {
+            return Err(Unreadable::TooLarge);
+        }
         pages.push(text.map(|t| t.to_string()).unwrap_or_default());
     }
     Ok(pages)
@@ -117,6 +123,15 @@ pub(crate) mod tests {
             super::page_texts_up_to(&p, &folyvo_compare::Limits::DEFAULT, 2),
             Err(folyvo_compare::Unreadable::TooLarge)
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn text_over_the_limit_stops_the_reading() {
+        let d = tempfile::tempdir().unwrap();
+        let p = pdf(d.path(), "a.pdf", &["Intro", "Total"]);
+        let limits = folyvo_compare::Limits { text_bytes: 6, ..folyvo_compare::Limits::DEFAULT };
+        assert_eq!(super::page_texts(&p, &limits), Err(folyvo_compare::Unreadable::TooLarge));
     }
 
     #[cfg(target_os = "macos")]
