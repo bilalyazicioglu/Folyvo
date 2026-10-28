@@ -7,8 +7,8 @@ use folyvo_core::model::{ItemId, VersionId};
 use base64::Engine as _;
 
 use crate::dto::{
-    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MatchDto, PreviewDto, RestoreDto, VaultStatsDto,
-    VersionDto,
+    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MarkedPageDto, MatchDto, PreviewDto, RestoreDto,
+    VaultStatsDto, VersionDto,
 };
 use crate::errors::UserError;
 use crate::preview;
@@ -121,6 +121,25 @@ impl AppApi {
                 format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
             });
         Ok(PreviewDto { picture, text: None, reveals_copy, app_name })
+    }
+
+    /// `version`'s text with what changed since the save before marked. The first save comes
+    /// back with nothing marked. Worked out each time it is asked for, and never kept.
+    pub fn changes(&self, item: &str, version: &str) -> Result<MarkedPageDto, UserError> {
+        let (item, version) = (ItemId::parse(item)?, VersionId::parse(version)?);
+        let inputs = self.engine.compare_inputs(&version)?;
+        if inputs.item != item {
+            return Err(folyvo_core::CoreError::VersionMissing(version).into());
+        }
+        let after = crate::changes::reading_of(&inputs.after, &inputs.name);
+        let changes = match &inputs.before {
+            None => folyvo_compare::compare(&after, &after),
+            Some((_, _, hash)) if *hash == inputs.after_hash => return Ok(MarkedPageDto::Identical),
+            Some((_, path, _)) => {
+                folyvo_compare::compare(&crate::changes::reading_of(path, &inputs.name), &after)
+            }
+        };
+        Ok(changes.marked.into())
     }
 
     /// Open the working file (`newest`, when it exists) or a read-only copy of `version` in its app.
@@ -408,5 +427,92 @@ mod tests {
         r.save("a.docx", b"12345");
         let s = r.api.stats().unwrap();
         assert_eq!((s.items, s.versions, s.bytes), (1, 1, 5));
+    }
+
+    impl Rig {
+        /// Saves the file at `src` as `name` in the work folder, and returns (item, version).
+        fn save_file(&self, name: &str, src: &std::path::Path) -> (String, String) {
+            let p = self.dir.path().join("work").join(name);
+            fs::copy(src, &p).unwrap();
+            let v = self.engine.ingest_path(&p).unwrap().unwrap().version().clone();
+            (v.item_id.to_string(), v.id.to_string())
+        }
+    }
+
+    #[test]
+    fn a_word_save_comes_back_marked() {
+        use crate::changes::tests::docx;
+        let r = rig();
+        let src = tempfile::tempdir().unwrap();
+        r.save_file("P.docx", &docx(src.path(), "a", &["Proposal", "Support, 12 months"]));
+        let (item, v2) = r.save_file("P.docx", &docx(src.path(), "b", &["Proposal", "Support, 18 months"]));
+        let json = serde_json::to_value(r.api.changes(&item, &v2).unwrap()).unwrap();
+        assert_eq!(json["kind"], "text");
+        assert_eq!(json["blocks"][0]["mark"], "same");
+        let changed = &json["blocks"][1];
+        assert_eq!(changed["mark"], "changed");
+        assert_eq!(changed["style"], serde_json::json!({"kind": "body"}));
+        assert_eq!(changed["section"], "body");
+        let spans = changed["spans"].as_array().unwrap();
+        assert!(spans.contains(&serde_json::json!({"kind": "removed", "text": "12"})), "{spans:?}");
+        assert!(spans.contains(&serde_json::json!({"kind": "added", "text": "18"})), "{spans:?}");
+    }
+
+    #[test]
+    fn a_spreadsheet_save_lists_changed_cells() {
+        use crate::changes::tests::xlsx;
+        let r = rig();
+        let src = tempfile::tempdir().unwrap();
+        r.save_file("C.xlsx", &xlsx(src.path(), "a", &[("C7", "1800")]));
+        let (item, v2) = r.save_file("C.xlsx", &xlsx(src.path(), "b", &[("C7", "2400")]));
+        let json = serde_json::to_value(r.api.changes(&item, &v2).unwrap()).unwrap();
+        assert_eq!(json["kind"], "sheets");
+        assert_eq!(json["sheets"][0]["name"], "Costs");
+        assert_eq!(
+            json["sheets"][0]["cells"][0],
+            serde_json::json!({"at": "C7", "before": "1800", "after": "2400"})
+        );
+    }
+
+    #[test]
+    fn an_unreadable_save_says_so() {
+        let r = rig();
+        r.save("photo.heic", b"one");
+        r.save("photo.heic", b"two");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        assert_eq!(
+            serde_json::to_value(r.api.changes(&item, &v).unwrap()).unwrap(),
+            serde_json::json!({"kind": "unreadable"})
+        );
+    }
+
+    #[test]
+    fn the_first_save_is_all_same() {
+        let r = rig();
+        r.save("n.txt", b"one\n\ntwo\n");
+        let item = r.item();
+        let v = r.api.history(&item).unwrap()[0].id.clone();
+        let json = serde_json::to_value(r.api.changes(&item, &v).unwrap()).unwrap();
+        let marks: Vec<&str> =
+            json["blocks"].as_array().unwrap().iter().map(|b| b["mark"].as_str().unwrap()).collect();
+        assert_eq!(marks, vec!["same", "same"]);
+    }
+
+    #[test]
+    fn a_save_of_another_file_is_refused() {
+        let r = rig();
+        let src = tempfile::tempdir().unwrap();
+        let (a, _) = r.save_file("a.txt", &{
+            let p = src.path().join("a");
+            fs::write(&p, b"a").unwrap();
+            p
+        });
+        let (_, b_version) = r.save_file("b.txt", &{
+            let p = src.path().join("b");
+            fs::write(&p, b"b").unwrap();
+            p
+        });
+        assert_eq!(r.api.changes(&a, &b_version).unwrap_err().code, "version_missing");
     }
 }

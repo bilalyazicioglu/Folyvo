@@ -1,3 +1,4 @@
+use folyvo_compare::{Mark, Marked, MarkedBlock, ParaStyle, Section, Span};
 use folyvo_core::engine::{EngineEvent, ItemSummary, Save, VaultStats, VersionView};
 use folyvo_core::export::ExportResult;
 use folyvo_core::model::{
@@ -373,6 +374,198 @@ pub struct PreviewDto {
     pub reveals_copy: bool,
     /// The app that opens this kind of file, such as "Microsoft Word".
     pub app_name: Option<String>,
+}
+
+/// One save's text with what changed since the save before marked, for the plain page.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum MarkedPageDto {
+    Text {
+        blocks: Vec<MarkedBlockDto>,
+    },
+    Sheets {
+        sheets: Vec<SheetChangesDto>,
+    },
+    /// Folyvo cannot read this kind of file, or this one.
+    Unreadable,
+    /// The save before has the very same content.
+    Identical,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MarkDto {
+    Same,
+    Added,
+    Removed,
+    Changed,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SectionDto {
+    Body,
+    Header,
+    Footer,
+    Notes,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export)]
+pub enum ParaStyleDto {
+    Body,
+    Heading { level: u8 },
+    ListItem,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SpanKindDto {
+    Same,
+    Added,
+    Removed,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SpanDto {
+    pub kind: SpanKindDto,
+    pub text: String,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarkedCellDto {
+    pub mark: MarkDto,
+    pub spans: Vec<SpanDto>,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum MarkedBlockDto {
+    Paragraph { section: SectionDto, style: ParaStyleDto, mark: MarkDto, spans: Vec<SpanDto> },
+    Table { section: SectionDto, mark: MarkDto, rows: Vec<Vec<MarkedCellDto>> },
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SheetChangesDto {
+    pub name: String,
+    pub mark: MarkDto,
+    pub cells: Vec<CellChangeDto>,
+}
+
+/// A cell that differs: `at` is its address ("B7").
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CellChangeDto {
+    pub at: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+impl From<Mark> for MarkDto {
+    fn from(m: Mark) -> Self {
+        match m {
+            Mark::Same => MarkDto::Same,
+            Mark::Added => MarkDto::Added,
+            Mark::Removed => MarkDto::Removed,
+            Mark::Changed => MarkDto::Changed,
+        }
+    }
+}
+
+impl From<Section> for SectionDto {
+    fn from(s: Section) -> Self {
+        match s {
+            Section::Body => SectionDto::Body,
+            Section::Header => SectionDto::Header,
+            Section::Footer => SectionDto::Footer,
+            Section::Notes => SectionDto::Notes,
+        }
+    }
+}
+
+impl From<ParaStyle> for ParaStyleDto {
+    fn from(s: ParaStyle) -> Self {
+        match s {
+            ParaStyle::Body => ParaStyleDto::Body,
+            ParaStyle::Heading(level) => ParaStyleDto::Heading { level },
+            ParaStyle::ListItem => ParaStyleDto::ListItem,
+        }
+    }
+}
+
+impl From<Span> for SpanDto {
+    fn from(s: Span) -> Self {
+        let (kind, text) = match s {
+            Span::Same(t) => (SpanKindDto::Same, t),
+            Span::Added(t) => (SpanKindDto::Added, t),
+            Span::Removed(t) => (SpanKindDto::Removed, t),
+        };
+        SpanDto { kind, text }
+    }
+}
+
+impl From<MarkedBlock> for MarkedBlockDto {
+    fn from(b: MarkedBlock) -> Self {
+        let spans = |spans: Vec<Span>| spans.into_iter().map(SpanDto::from).collect();
+        match b {
+            MarkedBlock::Paragraph { section, style, mark, spans: s } => MarkedBlockDto::Paragraph {
+                section: section.into(),
+                style: style.into(),
+                mark: mark.into(),
+                spans: spans(s),
+            },
+            MarkedBlock::Table { section, mark, rows } => MarkedBlockDto::Table {
+                section: section.into(),
+                mark: mark.into(),
+                rows: rows
+                    .into_iter()
+                    .map(|r| {
+                        r.into_iter()
+                            .map(|c| MarkedCellDto { mark: c.mark.into(), spans: spans(c.spans) })
+                            .collect()
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<Marked> for MarkedPageDto {
+    fn from(m: Marked) -> Self {
+        match m {
+            Marked::Text(blocks) => {
+                MarkedPageDto::Text { blocks: blocks.into_iter().map(Into::into).collect() }
+            }
+            Marked::Sheets(sheets) => MarkedPageDto::Sheets {
+                sheets: sheets
+                    .into_iter()
+                    .map(|s| SheetChangesDto {
+                        name: s.name,
+                        mark: s.mark.into(),
+                        cells: s
+                            .cells
+                            .into_iter()
+                            .map(|c| CellChangeDto { at: c.at.to_string(), before: c.before, after: c.after })
+                            .collect(),
+                    })
+                    .collect(),
+            },
+            Marked::Nothing => MarkedPageDto::Unreadable,
+        }
+    }
 }
 
 #[cfg(test)]
