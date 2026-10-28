@@ -62,6 +62,8 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
     let mut tables: Vec<Table> = Vec::new();
     // Inside a part that is `skipped`, nothing is read.
     let mut skipping: Option<usize> = None;
+    // For each open `mc:AlternateContent`: whether one of its choices has been read already.
+    let mut alternatives: Vec<bool> = Vec::new();
     while let Some(ev) = reader.next(budget)? {
         if let Some(depth) = skipping {
             match &ev {
@@ -73,9 +75,29 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
             continue;
         }
         if let Ev::Start(n, a) = &ev {
-            if skipped(n, a) {
-                skipping = Some(0);
-                continue;
+            let alternative_read = alternatives.last().copied().unwrap_or(false);
+            match n.as_str() {
+                "AlternateContent" => alternatives.push(false),
+                // Word draws the first choice it understands, else the fallback: read one copy only.
+                "Choice" | "Fallback" if alternative_read => {
+                    skipping = Some(0);
+                    continue;
+                }
+                "Choice" => {
+                    if let Some(read) = alternatives.last_mut() {
+                        *read = true;
+                    }
+                }
+                _ if skipped(n, a) => {
+                    skipping = Some(0);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if let Ev::End(n) = &ev {
+            if n == "AlternateContent" {
+                alternatives.pop();
             }
         }
         let (name, attrs, opens) = match &ev {
@@ -155,12 +177,11 @@ pub(crate) fn blocks_of(xml: &[u8], section: Section, budget: &mut Budget) -> Re
 }
 
 /// Parts of a document whose text is not in it as it reads now: the line drawn above the notes,
-/// the older copy of a text box Word keeps for old readers (`mc:Fallback`), and text a tracked
-/// change deleted or moved away.
+/// and text a tracked change deleted or moved away.
 fn skipped(name: &str, attrs: &[(String, String)]) -> bool {
     match name {
         "footnote" | "endnote" => matches!(attr(attrs, "type"), Some("separator" | "continuationSeparator")),
-        "Fallback" | "moveFrom" | "del" => true,
+        "moveFrom" | "del" => true,
         _ => false,
     }
 }
@@ -490,6 +511,15 @@ mod tests {
             b = wp("B")
         ));
         assert_eq!(got, vec![body("A"), body("B")]);
+    }
+
+    #[test]
+    fn a_fallback_without_a_choice_is_read() {
+        let got = blocks(&format!(
+            "<w:p><w:r><mc:AlternateContent><mc:Fallback><w:pict><v:textbox><w:txbxContent>{}</w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:r></w:p>",
+            wp("hidden?")
+        ));
+        assert_eq!(got, vec![body("hidden?")]);
     }
 
     #[test]
