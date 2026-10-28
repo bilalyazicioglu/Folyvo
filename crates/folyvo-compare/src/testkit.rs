@@ -72,3 +72,50 @@ pub(crate) fn patch_entry_count(path: &Path, count: u16) {
     bytes[end + 10..end + 12].copy_from_slice(&count.to_le_bytes());
     std::fs::write(path, bytes).unwrap();
 }
+
+const S: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+/// An Excel file. `sheets` are (name, file under `xl/worksheets/`, `<sheetData>` inner XML), in
+/// workbook order; `shared` the shared strings; `styles` the whole `styles.xml`, if any.
+pub(crate) fn xlsx(
+    dir: &Path,
+    sheets: &[(&str, &str, &str)],
+    shared: &[&str],
+    styles: Option<&str>,
+) -> PathBuf {
+    let listed: String = sheets
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _, _))| format!(r#"<sheet name="{name}" sheetId="{}" r:id="rId{}"/>"#, i + 1, i + 1))
+        .collect();
+    let workbook = format!(r#"<workbook xmlns="{S}" xmlns:r="{R}"><sheets>{listed}</sheets></workbook>"#);
+    let rels: String = sheets
+        .iter()
+        .enumerate()
+        .map(|(i, (_, file, _))| {
+            format!(r#"<Relationship Id="rId{}" Type="{R}/worksheet" Target="worksheets/{file}"/>"#, i + 1)
+        })
+        .collect();
+    let rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#
+    );
+    let strings: String = shared.iter().map(|s| format!("<si><t>{s}</t></si>")).collect();
+    let strings = format!(r#"<sst xmlns="{S}">{strings}</sst>"#);
+    let mut owned: Vec<(String, String)> = vec![
+        ("xl/workbook.xml".into(), workbook),
+        ("xl/_rels/workbook.xml.rels".into(), rels),
+        ("xl/sharedStrings.xml".into(), strings),
+    ];
+    for (_, file, data) in sheets {
+        owned.push((
+            format!("xl/worksheets/{file}"),
+            format!(r#"<worksheet xmlns="{S}"><sheetData>{data}</sheetData></worksheet>"#),
+        ));
+    }
+    if let Some(styles) = styles {
+        owned.push(("xl/styles.xml".into(), styles.to_string()));
+    }
+    let parts: Vec<(&str, &[u8])> = owned.iter().map(|(n, x)| (n.as_str(), x.as_bytes())).collect();
+    zip_file(dir, "book.xlsx", &parts)
+}
