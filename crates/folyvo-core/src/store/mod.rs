@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{CoreError, Result};
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 const SCHEMA: &str = include_str!("schema.sql");
 
 /// v1 -> v2: the share-ready mark is gone, copies handed to another app are recorded.
@@ -32,17 +32,41 @@ DROP TABLE share_ready;
 CREATE INDEX versions_by_hash ON versions(content_hash);
 ";
 
-/// Upgrade a v1 database in one transaction. The write lock is taken first and the version read
-/// again inside it, so a second process that arrives after the first has migrated does nothing.
-fn migrate_from_v1(conn: &mut Connection) -> Result<()> {
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 1 {
-        return Ok(());
+/// v2 -> v3: what changed in each save, as counts.
+const MIGRATE_2_TO_3: &str = "
+CREATE TABLE version_changes (
+    version_id  TEXT    PRIMARY KEY REFERENCES versions(id),
+    compared_to TEXT    REFERENCES versions(id),
+    outcome     TEXT    NOT NULL CHECK (outcome IN ('first', 'text', 'same_text', 'identical', 'unknown')),
+    reader      INTEGER NOT NULL
+);
+CREATE TABLE version_change_counts (
+    version_id  TEXT    NOT NULL REFERENCES version_changes(version_id),
+    unit        TEXT    NOT NULL CHECK (unit IN ('line', 'paragraph', 'cell', 'sheet', 'page')),
+    added       INTEGER NOT NULL DEFAULT 0,
+    removed     INTEGER NOT NULL DEFAULT 0,
+    changed     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (version_id, unit)
+);
+";
+
+/// Each step takes a database from the version before it to its own.
+const STEPS: &[(i64, &str)] = &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3)];
+
+/// Upgrade a database from `from` one step at a time, each step in its own transaction. The write
+/// lock is taken first and the version read again inside it, so a second process that arrives
+/// after the first has migrated does nothing.
+fn migrate(conn: &mut Connection, from: i64) -> Result<()> {
+    for &(to, sql) in STEPS.iter().filter(|(to, _)| *to > from) {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version != to - 1 {
+            continue;
+        }
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", to)?;
+        tx.commit()?;
     }
-    tx.execute_batch(MIGRATE_1_TO_2)?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -69,7 +93,7 @@ impl Store {
                 conn.execute_batch(SCHEMA)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1 => migrate_from_v1(&mut conn)?,
+            1 | 2 => migrate(&mut conn, version)?,
             SCHEMA_VERSION => {}
             other => return Err(CoreError::Corrupt(format!("unsupported database schema version {other}"))),
         }
@@ -238,10 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn a_new_database_is_v2_without_share_ready() {
+    fn a_new_database_is_v3_without_share_ready() {
         let s = store();
         let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
+        assert!(has(&s, "table", "version_changes"));
+        assert!(has(&s, "table", "version_change_counts"));
         assert!(!has(&s, "table", "share_ready"));
         assert!(has(&s, "index", "versions_by_hash"));
     }
@@ -253,7 +279,8 @@ mod tests {
         v1_vault(&path);
         let s = Store::open(&path).unwrap();
         let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
+        assert!(has(&s, "table", "version_changes"));
         assert_eq!((count(&s, "versions"), count(&s, "objects"), count(&s, "share_events")), (3, 2, 1));
         let (kind, service, target): (String, Option<String>, String) = s
             .conn()
@@ -302,8 +329,43 @@ mod tests {
         v1_vault(&path);
         let mut late = rusqlite::Connection::open(&path).unwrap();
         drop(Store::open(&path).unwrap()); // the other process migrates first
-        migrate_from_v1(&mut late).unwrap();
+        migrate(&mut late, 1).unwrap();
         let s = Store::open(&path).unwrap();
         assert_eq!((count(&s, "versions"), count(&s, "share_events")), (3, 1));
+    }
+
+    #[test]
+    fn a_v2_database_gains_the_change_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folyvo.db");
+        {
+            let c = rusqlite::Connection::open(&path).unwrap();
+            c.execute_batch(include_str!("schema_v2.sql")).unwrap();
+            c.execute_batch(
+                "INSERT INTO items(id,display_name,created_at) VALUES ('itm_a','a.docx',1);
+                 INSERT INTO objects(content_hash,size,stored_at) VALUES ('b3_x',1,1);
+                 INSERT INTO versions(id,item_id,seq,content_hash,size,created_at,origin) VALUES
+                   ('ver_1','itm_a',1,'b3_x',1,1,'initial');",
+            )
+            .unwrap();
+            c.pragma_update(None, "user_version", 2).unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 3);
+        assert!(has(&s, "table", "version_changes") && has(&s, "table", "version_change_counts"));
+        assert_eq!(count(&s, "versions"), 1);
+    }
+
+    #[test]
+    fn a_change_outcome_must_be_known() {
+        let s = store();
+        seed_item(&s, "itm_a");
+        seed_version(&s, "ver_a1", "itm_a", 1).unwrap();
+        let ins = |outcome: &str| {
+            exec(&s, &format!("INSERT OR REPLACE INTO version_changes(version_id,compared_to,outcome,reader) VALUES ('ver_a1',NULL,'{outcome}',1)"))
+        };
+        assert!(ins("diff").is_err());
+        ins("identical").unwrap();
     }
 }

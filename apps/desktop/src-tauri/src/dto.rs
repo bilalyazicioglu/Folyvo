@@ -156,6 +156,11 @@ pub enum EngineEventDto {
         item_id: String,
     },
     RootsChanged,
+    /// What changed in a save is now known; its versions list can show it.
+    ChangesReady {
+        item_id: String,
+        version_id: String,
+    },
     /// The event channel lagged: everything the UI shows may be stale.
     Resync,
 }
@@ -176,6 +181,9 @@ impl From<EngineEvent> for EngineEventDto {
             EngineEvent::ItemMissing { item } => EngineEventDto::ItemMissing { item_id: item.to_string() },
             EngineEvent::ItemUpdated { item } => EngineEventDto::ItemUpdated { item_id: item.to_string() },
             EngineEvent::RootsChanged => EngineEventDto::RootsChanged,
+            EngineEvent::ChangesReady { item, version } => {
+                EngineEventDto::ChangesReady { item_id: item.to_string(), version_id: version.to_string() }
+            }
         }
     }
 }
@@ -308,6 +316,7 @@ mod tests {
             origin: VersionOrigin::Restore,
             note: Some("Sent to Acme".into()),
             code: "0a".into(),
+            change: None,
         };
         let json = serde_json::to_value(VersionDto::from(v)).unwrap();
         assert_eq!(json["id"], "ver_0a");

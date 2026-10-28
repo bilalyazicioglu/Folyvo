@@ -113,7 +113,7 @@ impl From<CoreError> for UserError {
                     "Check that the file or folder still exists.",
                 ),
             },
-            CoreError::PathTaken(_) | CoreError::Db(_) => Self::internal(),
+            CoreError::PathTaken(_) | CoreError::Db(_) | CoreError::BadChange(_) => Self::internal(),
         }
     }
 }
