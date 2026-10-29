@@ -346,9 +346,10 @@ pub(crate) mod tests {
         let _worker = ChangeWorker::start(f.engine.clone());
         let v1 = save(&f, "n.txt", b"one\n");
         save(&f, "n.txt", b"one\n\ntwo\n");
+        // The worker keeps each save as unknown before reading it, so wait for the real outcome.
         wait_until("both saves to be compared", || {
             let h = f.engine.history(&v1.item_id).unwrap();
-            h.iter().all(|v| v.change.is_some())
+            h.iter().all(|v| v.change.as_ref().is_some_and(|c| c.outcome != ChangeOutcome::Unknown))
         });
         let h = f.engine.history(&v1.item_id).unwrap();
         assert_eq!(h[0].change.as_ref().unwrap().outcome, ChangeOutcome::Text);
