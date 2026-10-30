@@ -42,7 +42,7 @@ No account. No cloud. Folyvo reads your files and keeps copies in your own Libra
 
 ## Status
 
-Folyvo is in development and there is no download yet. The first release will be a signed app for macOS on Apple Silicon ([#51](https://github.com/bilalyazicioglu/Folyvo/issues/51)). Until then you can [run it from source](docs/development/desktop.md).
+Folyvo is under development and there is no download yet. The first release will be a signed app for macOS on Apple Silicon ([#51](https://github.com/bilalyazicioglu/Folyvo/issues/51)). Until then you can [run it from source](docs/development/desktop.md).
 
 Windows is not planned yet. If you want it, add a 👍 to [#67](https://github.com/bilalyazicioglu/Folyvo/issues/67).
 
