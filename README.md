@@ -1,10 +1,5 @@
 <p align="center">
-  <a href="https://folyvo.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/folyvo-wordmark-dark.svg">
-      <img src="docs/assets/folyvo-wordmark.svg" alt="Folyvo" width="200">
-    </picture>
-  </a>
+  <a href="https://folyvo.com"><img src="docs/assets/folyvo-icon.svg" alt="Folyvo" width="96"></a>
 </p>
 
 <h3 align="center">Every save, kept. Nothing to learn.</h3>
