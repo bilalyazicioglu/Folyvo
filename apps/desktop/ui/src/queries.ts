@@ -4,6 +4,8 @@ import { api, AppError, INTERNAL_ERROR } from "./api";
 import type { UserError } from "./generated/UserError";
 
 export const useRecent = () => useQuery({ queryKey: ["recent"], queryFn: () => api.recent(200) });
+/** Every kept file; the limit only keeps the number in range. */
+export const useAllFiles = () => useQuery({ queryKey: ["all-files"], queryFn: () => api.recent(1_000_000) });
 export const useItem = (item: string) => useQuery({ queryKey: ["item", item], queryFn: () => api.item(item) });
 export const useHistory = (item?: string) =>
   useQuery({ queryKey: ["history", item], queryFn: () => api.history(item!), enabled: !!item });

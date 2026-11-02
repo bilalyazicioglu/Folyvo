@@ -31,6 +31,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .popover { position: relative; display: flex; flex-direction: column; padding: 4px 6px 2px; border-radius: 24px; background: color-mix(in srgb, var(--bg) var(--glass-tint), transparent); }
 .popover__body { max-height: 440px; overflow-y: auto; }
 .popover__foot { margin-top: 4px; padding: 2px 10px 4px; border-top: 0.5px solid var(--soft-line); color: var(--muted); font-size: 12px; }
+.popover__all { display: block; width: 100%; min-height: 36px; padding: 0 4px; text-align: left; text-decoration: none; color: var(--ink); }
 .popover__keeping { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .popover__keeping .btn--link { min-height: 36px; text-decoration: none; color: var(--ink); }
 .popover .folders { flex: 1; min-width: 0; margin: 0; }
@@ -74,6 +75,18 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .drop-overlay { position: absolute; inset: 6px; display: grid; place-items: center; padding: 20px; border: 2px dashed var(--accent); border-radius: 20px; background: color-mix(in srgb, var(--bg) 85%, transparent); text-align: center; font-weight: 600; }
 
 /* The versions window: a table the pages lie on, the saved times in the sidebar's glass. */
+.all { height: 100%; display: flex; flex-direction: column; background: transparent; }
+.all__head { flex: none; display: flex; align-items: center; min-height: 52px; padding: 10px 14px 8px 88px; }
+.all__search { flex: 1; min-width: 0; min-height: 32px; padding: 0 12px; border: 0; border-radius: 16px; background: var(--field); color: var(--ink); font: inherit; outline-offset: 1px; }
+.all__search::placeholder { color: var(--muted); }
+.all__search::-webkit-search-cancel-button { display: none; }
+.all__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
+.all__folder { margin: 0; padding: 12px 10px 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.all__row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 10px; border-radius: 14px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 52px; }
+.all__row:hover { background: var(--hover); }
+.all__row.is-active { background: var(--accent-soft); }
+.all__row.is-missing .doc { opacity: 0.55; }
+
 .versions { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 280px; background: transparent; }
 .versions__main { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--stage-bg); box-shadow: 0.5px 0 0 var(--soft-line); overflow: hidden; }
 .versions__head { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 22px 6px 88px; }

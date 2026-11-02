@@ -151,6 +151,11 @@ export function Popover() {
 
       {folderList.length > 0 && (
         <footer className="popover__foot">
+          {items.length > 0 && (
+            <button type="button" className="btn btn--link popover__all" onClick={() => void api.openAllFiles()}>
+              All Files…
+            </button>
+          )}
           <div className="popover__keeping">
             <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} summary={keeping(folderList)} />
             <button type="button" className="btn btn--link" disabled={act.busy} onClick={() => void addFolder()}>

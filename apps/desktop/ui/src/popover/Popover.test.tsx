@@ -308,3 +308,20 @@ describe("files changed while Folyvo was not running", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
+
+describe("reaching every file", () => {
+  it("opens All Files from under the list", async () => {
+    const b = backend();
+    renderWithClient(<Popover />);
+    await userEvent.click(await screen.findByRole("button", { name: "All Files…" }));
+    expect(b.called("open_all_files")).toHaveLength(1);
+  });
+
+  it("does not offer it before anything is kept", async () => {
+    const b = backend();
+    b.state.recent = [];
+    renderWithClient(<Popover />);
+    await screen.findByText("Waiting for the first save");
+    expect(screen.queryByRole("button", { name: "All Files…" })).not.toBeInTheDocument();
+  });
+});

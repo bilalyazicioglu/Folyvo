@@ -212,6 +212,11 @@ pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
     crate::tray::open_versions(&app, &item, None).map_err(|_| UserError::internal())
 }
 
+#[tauri::command]
+pub fn open_all_files(app: AppHandle) -> Result<(), UserError> {
+    crate::tray::open_all_files(&app).map_err(|_| UserError::internal())
+}
+
 /// The popover asks for the height of its content; the window follows within limits.
 #[tauri::command]
 pub fn fit_popover(app: AppHandle, height: f64) {

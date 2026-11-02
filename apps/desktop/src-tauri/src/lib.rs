@@ -93,6 +93,7 @@ pub fn run() {
             commands::add_folder,
             commands::remove_folder,
             commands::open_history,
+            commands::open_all_files,
             commands::hide_popover,
             commands::fit_popover,
             commands::set_dialog_open,
@@ -140,7 +141,8 @@ pub fn run() {
                 }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    if let Some(w) = app.get_webview_window(tray::VERSIONS) {
+                    let open = [tray::VERSIONS, tray::ALL_FILES];
+                    if let Some(w) = open.iter().find_map(|label| app.get_webview_window(label)) {
                         let _ = w.unminimize();
                         let _ = w.show();
                         let _ = w.set_focus();
@@ -165,6 +167,17 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A window not named here cannot call the app at all.
+    #[test]
+    fn every_window_may_use_the_app() {
+        let caps: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let windows = caps["windows"].as_array().unwrap();
+        for label in ["popover", tray::VERSIONS, tray::ALL_FILES] {
+            assert!(windows.iter().any(|w| w == label), "{label}");
+        }
+    }
 
     // Previews reach the page as data: URLs. `cargo tauri dev` does not show this rule breaking them.
     #[test]

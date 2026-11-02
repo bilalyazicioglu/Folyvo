@@ -78,6 +78,7 @@ export const api = {
   addFolder: (path: string) => call<void>("add_folder", { path }),
   removeFolder: (path: string) => call<void>("remove_folder", { path }),
   openHistory: (item: string) => call<void>("open_history", { item }),
+  openAllFiles: () => call<void>("open_all_files"),
   hidePopover: () => call<void>("hide_popover"),
   /** The popover window follows the height of its content. */
   fitPopover: (height: number) => call<void>("fit_popover", { height }),
