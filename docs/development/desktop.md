@@ -57,6 +57,7 @@ CI fails when the generated files in `apps/desktop/ui/src/generated` differ from
 
 Folyvo's four actions (Browse All Versions…, Send a Copy…, Save a Copy…, Which One Is This?…) reach Finder two ways:
 
+- **Starting with the Mac.** An installed copy adds itself to the login items the first time it starts, and never again, so a person who turns it off in System Settings keeps it off. `cargo tauri dev` stays out of the login items. When a kept file changed while Folyvo was not running, the menu bar list says so once: how the file looks now is kept, the saves in between are not.
 - **Finder's right-click menu**, from a Finder Sync extension inside the app (`Contents/PlugIns/FolyvoFinderSync.appex`). `cargo tauri build` builds it through `apps/desktop/finder/build.sh` (Swift, no Xcode project, no Apple account) and signs it ad hoc. The app turns it on the first time it starts and leaves it alone after that, so a person who turns it off in System Settings keeps it off. Its items appear for files in the home folder. macOS does not run Finder extensions in iCloud Drive folders.
 - **Right-click › Services › Folyvo: …**, declared in `src-tauri/Info.plist`. This works in every folder, iCloud Drive included, and needs no setting.
 
@@ -103,3 +104,5 @@ Walk through this on a real Mac whenever the window code changes:
 19. Right-click a file in Downloads that Folyvo never saved and choose **Which One Is This?…**. The popover opens under the menu bar icon with the answer.
 20. In an iCloud Drive folder (or Desktop and Documents when they are in iCloud), right-click a file: the Finder items are missing, and **Services › Folyvo: Browse All Versions…** does the same job.
 21. Quit Folyvo, then choose a Finder or Services item. Folyvo starts and opens the same window.
+22. Open the built app for the first time. macOS says Folyvo was added to the login items, and it is listed in System Settings, General, Login Items. Restart the Mac: Folyvo is in the menu bar without being opened. Turn it off in System Settings and open Folyvo again: it stays off.
+23. Quit Folyvo, change a kept file, and open Folyvo. The menu bar list says one file changed while Folyvo wasn't running. Press **OK**: the line goes away and does not come back.

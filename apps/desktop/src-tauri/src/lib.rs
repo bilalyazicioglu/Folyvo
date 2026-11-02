@@ -6,6 +6,7 @@ pub mod dto;
 pub mod errors;
 pub mod fit;
 pub mod intent;
+pub mod login;
 pub mod pdf;
 pub mod preview;
 pub mod runtime;
@@ -120,6 +121,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 services::register(app.handle());
+                login::add_once(&vault);
                 enable_finder_extension();
             }
             // A Finder or Services request that launched Folyvo is answered once the engine is up.
