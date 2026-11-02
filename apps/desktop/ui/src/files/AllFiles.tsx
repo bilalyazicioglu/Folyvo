@@ -4,7 +4,10 @@ import { api } from "../api";
 import { DocIcon } from "../components/DocIcon";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { useAction, useAllFiles, useFolders, useNow } from "../queries";
-import { whenLabel } from "../time";
+import { middleTruncate, whenLabel } from "../time";
+
+/** Long names lose their middle: similar names differ at the end. The full name is the row's tooltip. */
+const NAME_MAX = 64;
 
 function subLine({ item, subfolder }: FileEntry, now: number): string {
   const saved = `last saved ${whenLabel(item.latestAt, now)}`;
@@ -45,7 +48,15 @@ export function AllFiles() {
     if (picked) await act.run(() => api.addFolder(picked));
   };
 
+  const clearSearch = () => {
+    setTyped("");
+    setActive(0);
+    search.current?.focus();
+  };
+
   const onKey = (e: React.KeyboardEvent) => {
+    // This Enter or arrow belongs to the input method still composing a word.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
@@ -54,8 +65,7 @@ export function AllFiles() {
       open(entries[current].item.itemId);
     } else if (e.key === "Escape") {
       if (typed) {
-        setTyped("");
-        setActive(0);
+        clearSearch();
       } else {
         void api.closeWindow();
       }
@@ -82,7 +92,7 @@ export function AllFiles() {
         <DocIcon name={item.name} />
         <span className="file__text">
           <span className="file__name" title={item.name} data-testid="name">
-            {item.name}
+            {middleTruncate(item.name, NAME_MAX)}
           </span>
           <span className="file__sub">{subLine(entry, now)}</span>
         </span>
@@ -91,7 +101,15 @@ export function AllFiles() {
   };
 
   return (
-    <main className="all" aria-label="All Files" aria-busy={!loaded}>
+    <main
+      className="all"
+      aria-label="All Files"
+      aria-busy={!loaded}
+      // A click anywhere but a button leaves the cursor in the search, so the keyboard keeps working.
+      onClick={(e) => {
+        if (!(e.target as Element).closest("button")) search.current?.focus();
+      }}
+    >
       <header className="all__head" data-tauri-drag-region>
         <input
           ref={search}
@@ -123,7 +141,17 @@ export function AllFiles() {
         <section className="empty">
           <h2>{nothingKept ? "No files kept yet" : `No files named “${typed.trim()}”`}</h2>
           <p>Folyvo keeps files in the folders you choose.</p>
-          <button type="button" className="btn btn--primary" disabled={act.busy} onClick={() => void addFolder()}>
+          {!nothingKept && (
+            <button type="button" className="btn btn--primary" onClick={clearSearch}>
+              Clear Search
+            </button>
+          )}
+          <button
+            type="button"
+            className={nothingKept ? "btn btn--primary" : "btn btn--link"}
+            disabled={act.busy}
+            onClick={() => void addFolder()}
+          >
             Add Folder…
           </button>
         </section>
