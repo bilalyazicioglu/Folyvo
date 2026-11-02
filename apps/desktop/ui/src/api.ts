@@ -72,6 +72,9 @@ export const api = {
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
   folders: () => call<FolderDto[]>("folders"),
+  /** How many kept files changed while Folyvo was not running. */
+  missedWhileClosed: () => call<number>("missed_while_closed"),
+  dismissMissed: () => call<void>("dismiss_missed"),
   addFolder: (path: string) => call<void>("add_folder", { path }),
   removeFolder: (path: string) => call<void>("remove_folder", { path }),
   openHistory: (item: string) => call<void>("open_history", { item }),

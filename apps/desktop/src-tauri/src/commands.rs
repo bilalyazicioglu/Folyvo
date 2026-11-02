@@ -185,6 +185,16 @@ pub async fn folders(rt: Rt<'_>) -> Result<Vec<FolderDto>, UserError> {
 }
 
 #[tauri::command]
+pub fn missed_while_closed(rt: Rt<'_>) -> usize {
+    rt.missed_while_closed()
+}
+
+#[tauri::command]
+pub fn dismiss_missed(rt: Rt<'_>) {
+    rt.dismiss_missed();
+}
+
+#[tauri::command]
 pub async fn add_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
     let rt = rt.inner().clone();
     blocking(move || rt.add_folder(&PathBuf::from(path))).await

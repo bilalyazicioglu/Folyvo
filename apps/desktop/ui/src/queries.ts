@@ -9,6 +9,7 @@ export const useHistory = (item?: string) =>
   useQuery({ queryKey: ["history", item], queryFn: () => api.history(item!), enabled: !!item });
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: api.stats });
 export const useFolders = () => useQuery({ queryKey: ["folders"], queryFn: api.folders });
+export const useMissed = () => useQuery({ queryKey: ["missed"], queryFn: api.missedWhileClosed });
 export const useActivity = (from: number, to: number) =>
   useQuery({ queryKey: ["activity", from, to], queryFn: () => api.activity(from, to) });
 /** A version's picture never changes, so it is drawn once per window. */

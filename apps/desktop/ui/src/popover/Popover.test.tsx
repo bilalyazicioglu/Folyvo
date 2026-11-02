@@ -273,3 +273,38 @@ test("a which-one request from Finder answers in the popover like a drop", async
   expect(await screen.findByRole("status")).toHaveTextContent("No saved version has exactly this content.");
   expect(b.called("which")[0].args).toEqual({ path: "/Users/a/Downloads/back.docx" });
 });
+
+describe("files changed while Folyvo was not running", () => {
+  it("says so once and goes away for good when dismissed", async () => {
+    const b = backend();
+    let missed = 2;
+    b.state.handlers.missed_while_closed = () => missed;
+    b.state.handlers.dismiss_missed = () => {
+      missed = 0;
+    };
+    renderWithClient(<Popover />);
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("2 files changed while Folyvo wasn't running");
+    expect(notice).toHaveTextContent("Folyvo kept how they look now, not the saves in between.");
+    await userEvent.click(within(notice).getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(b.called("dismiss_missed")).toHaveLength(1);
+  });
+
+  it("names one file in the singular", async () => {
+    const b = backend();
+    b.state.handlers.missed_while_closed = () => 1;
+    renderWithClient(<Popover />);
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("1 file changed while Folyvo wasn't running");
+    expect(notice).toHaveTextContent("Folyvo kept how it looks now, not the saves in between.");
+  });
+
+  it("says nothing when nothing changed", async () => {
+    const b = backend();
+    b.state.handlers.missed_while_closed = () => 0;
+    renderWithClient(<Popover />);
+    await screen.findByText(LONG);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -25,6 +26,7 @@ pub struct AppRuntime {
     runners: Mutex<HashMap<PathBuf, Runner>>,
     problems: Mutex<HashMap<PathBuf, UserError>>,
     changes: ChangeWorker,
+    missed: AtomicUsize,
 }
 
 impl AppRuntime {
@@ -54,10 +56,16 @@ impl AppRuntime {
             quiet,
             runners: Mutex::new(HashMap::new()),
             problems: Mutex::new(HashMap::new()),
+            missed: AtomicUsize::new(0),
         });
         for root in runtime.engine.roots()? {
-            if let Err(problem) = runtime.start_runner(&root) {
-                runtime.problems.lock().unwrap().insert(root, problem);
+            match runtime.start_runner(&root) {
+                Ok(changed) => {
+                    runtime.missed.fetch_add(changed, Ordering::SeqCst);
+                }
+                Err(problem) => {
+                    runtime.problems.lock().unwrap().insert(root, problem);
+                }
             }
         }
         Ok(runtime)
@@ -72,6 +80,16 @@ impl AppRuntime {
         if let Ok(item) = folyvo_core::model::ItemId::parse(item) {
             self.changes.backfill(&self.engine, &item);
         }
+    }
+
+    /// How many kept files changed while Folyvo was not running: the saves between their last kept
+    /// version and how they look now are gone. A new file is not counted; nothing of it was kept before.
+    pub fn missed_while_closed(&self) -> usize {
+        self.missed.load(Ordering::SeqCst)
+    }
+
+    pub fn dismiss_missed(&self) {
+        self.missed.store(0, Ordering::SeqCst);
     }
 
     pub fn add_folder(&self, folder: &Path) -> Result<(), UserError> {
@@ -103,20 +121,21 @@ impl AppRuntime {
             .collect()
     }
 
-    fn start_runner(&self, folder: &Path) -> Result<(), UserError> {
+    /// Returns how many kept files the first scan found changed.
+    fn start_runner(&self, folder: &Path) -> Result<usize, UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         if self.runners.lock().unwrap().contains_key(&canonical) {
-            return Ok(());
+            return Ok(0);
         }
         let on_applied: OnApplied = Arc::new(|applied| {
             if let Applied::Failed { path, reason } = applied {
                 eprintln!("folyvo: could not save {}: {reason}", path.display());
             }
         });
-        let (runner, _report) =
+        let (runner, report) =
             Runner::start(self.engine.clone(), self.clock.clone(), folder, self.quiet, on_applied)?;
         self.runners.lock().unwrap().insert(runner.folder().to_path_buf(), runner);
-        Ok(())
+        Ok(report.changed)
     }
 }
 
@@ -244,6 +263,29 @@ mod tests {
         fs::write(folder.join("b.txt"), b"y").unwrap();
         std::thread::sleep(Duration::from_millis(800));
         assert_eq!(recent_names(&rt), vec!["a.txt".to_string()], "history stays, watching stops");
+    }
+
+    #[test]
+    fn a_file_changed_while_folyvo_was_closed_is_told_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"first").unwrap();
+        {
+            let (rt, _rx) = start(dir.path());
+            rt.add_folder(&folder).unwrap();
+            assert_eq!(rt.missed_while_closed(), 0, "adding a folder is not a gap");
+        }
+        fs::write(folder.join("a.txt"), b"second").unwrap();
+        fs::write(folder.join("new.txt"), b"nothing was missed of a new file").unwrap();
+        {
+            let (rt, _rx) = start(dir.path());
+            assert_eq!(rt.missed_while_closed(), 1);
+            rt.dismiss_missed();
+            assert_eq!(rt.missed_while_closed(), 0);
+        }
+        let (rt, _rx) = start(dir.path());
+        assert_eq!(rt.missed_while_closed(), 0, "nothing changed since the last launch");
     }
 
     #[test]
