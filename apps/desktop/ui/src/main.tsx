@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { startEventBridge } from "./events";
 import { AllFiles } from "./files/AllFiles";
+import { FirstWindow } from "./first/FirstWindow";
 import { Popover } from "./popover/Popover";
 import "./styles/app.css";
 import { Versions } from "./versions/Versions";
@@ -20,6 +21,8 @@ async function start() {
         <Versions itemId={params.get("item") ?? ""} action={params.get("action")} />
       ) : params.get("view") === "files" ? (
         <AllFiles />
+      ) : params.get("view") === "first" ? (
+        <FirstWindow />
       ) : (
         <Popover />
       )}

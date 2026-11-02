@@ -4,6 +4,7 @@ pub mod changes;
 pub mod commands;
 pub mod dto;
 pub mod errors;
+pub mod first_window;
 pub mod fit;
 pub mod intent;
 pub mod login;
@@ -94,6 +95,8 @@ pub fn run() {
             commands::remove_folder,
             commands::open_history,
             commands::open_all_files,
+            commands::suggested_folders,
+            commands::finish_first_window,
             commands::hide_popover,
             commands::fit_popover,
             commands::set_dialog_open,
@@ -125,6 +128,13 @@ pub fn run() {
                 login::add_once(&vault);
                 enable_finder_extension();
             }
+            let keeps_a_folder = !app.state::<Arc<runtime::AppRuntime>>().folders().is_empty();
+            if first_window::should_show(keeps_a_folder, first_window::shown_before(&vault)) {
+                if let Err(e) = first_window::remember_shown(&vault) {
+                    eprintln!("folyvo: could not remember the first window: {e}");
+                }
+                tray::open_first_window(app.handle())?;
+            }
             // A Finder or Services request that launched Folyvo is answered once the engine is up.
             if let Some(intent) = app.state::<intent::PendingIntent>().0.lock().unwrap().take() {
                 intent::act_on(app.handle(), intent);
@@ -138,10 +148,13 @@ pub fn run() {
             match &event {
                 tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                     tray::follow_windows(app, Some(label.as_str()));
+                    if label == tray::FIRST_WINDOW {
+                        tray::after_first_window(app);
+                    }
                 }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    let open = [tray::VERSIONS, tray::ALL_FILES];
+                    let open = [tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW];
                     if let Some(w) = open.iter().find_map(|label| app.get_webview_window(label)) {
                         let _ = w.unminimize();
                         let _ = w.show();
@@ -174,7 +187,7 @@ mod tests {
         let caps: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         let windows = caps["windows"].as_array().unwrap();
-        for label in ["popover", tray::VERSIONS, tray::ALL_FILES] {
+        for label in ["popover", tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW] {
             assert!(windows.iter().any(|w| w == label), "{label}");
         }
     }

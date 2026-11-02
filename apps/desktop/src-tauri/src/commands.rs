@@ -213,6 +213,18 @@ pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
 }
 
 #[tauri::command]
+pub fn suggested_folders(app: AppHandle) -> Vec<String> {
+    let home = app.path().home_dir().unwrap_or_default();
+    crate::first_window::suggested(&home).into_iter().map(|p| p.to_string_lossy().into_owned()).collect()
+}
+
+/// Closes the first window and shows where Folyvo lives from now on.
+#[tauri::command]
+pub fn finish_first_window(app: AppHandle) -> Result<(), UserError> {
+    crate::tray::finish_first_window(&app).map_err(|_| UserError::internal())
+}
+
+#[tauri::command]
 pub fn open_all_files(app: AppHandle) -> Result<(), UserError> {
     crate::tray::open_all_files(&app).map_err(|_| UserError::internal())
 }

@@ -113,10 +113,14 @@ pub const VERSIONS: &str = "versions";
 /// The label of the window that lists every kept file.
 pub const ALL_FILES: &str = "files";
 
+/// The label of the window shown on first launch.
+pub const FIRST_WINDOW: &str = "first";
+
 /// Whether Folyvo should be in the Dock and in Command-Tab: while one of its windows is open, so a
 /// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
 pub fn in_dock<'a>(open: impl IntoIterator<Item = &'a str>, closing: Option<&str>) -> bool {
-    open.into_iter().any(|label| (label == VERSIONS || label == ALL_FILES) && closing != Some(label))
+    open.into_iter()
+        .any(|label| [VERSIONS, ALL_FILES, FIRST_WINDOW].contains(&label) && closing != Some(label))
 }
 
 /// Shows or hides Folyvo in the Dock and Command-Tab to match the windows open now.
@@ -201,6 +205,42 @@ pub fn open_all_files(app: &AppHandle) -> tauri::Result<()> {
     window.set_focus()
 }
 
+/// The window a new person sees first. It is a fixed size: there is nothing in it to make room for.
+pub fn open_first_window(app: &AppHandle) -> tauri::Result<()> {
+    let builder =
+        WebviewWindowBuilder::new(app, FIRST_WINDOW, WebviewUrl::App("index.html?view=first".into()))
+            .title("Welcome to Folyvo")
+            .inner_size(460.0, 640.0)
+            .resizable(false)
+            .center();
+    #[cfg(target_os = "macos")]
+    let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    let window = builder.build()?;
+    follow_windows(app, None);
+    window.set_focus()
+}
+
+/// Closes the first window. The popover follows from `after_first_window`, however it was closed.
+pub fn finish_first_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(FIRST_WINDOW) {
+        w.close()?;
+    }
+    Ok(())
+}
+
+/// Opens the popover, which is where Folyvo lives from now on. Leaving the Dock takes focus from the
+/// app a moment after the window has gone, and a popover without focus hides, so it waits for that.
+pub fn after_first_window(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let _ = show_popover(&main);
+        });
+    });
+}
+
 /// Liquid Glass behind the whole versions window; the page lays the stage over it as an opaque panel
 /// and leaves the saved times on the glass. Falls back to the sidebar material before macOS 26.
 #[cfg(target_os = "macos")]
@@ -231,14 +271,19 @@ pub fn show_which(app: &AppHandle, path: &std::path::Path) -> tauri::Result<()> 
     if let Some(pending) = app.try_state::<PendingWhich>() {
         *pending.0.lock().unwrap() = Some(path.to_string_lossy().into_owned());
     }
+    show_popover(app)?;
+    app.emit_to("popover", "intent-which", ())
+}
+
+/// Shows the popover under the menu bar icon.
+fn show_popover(app: &AppHandle) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window("popover") else { return Ok(()) };
     // Before the menu bar icon was ever clicked its position is unknown; the top right is where it lives.
     if window.move_window(Position::TrayBottomCenter).is_err() {
         let _ = window.move_window(Position::TopRight);
     }
     window.show()?;
-    window.set_focus()?;
-    app.emit_to("popover", "intent-which", ())
+    window.set_focus()
 }
 
 #[cfg(test)]
@@ -250,6 +295,7 @@ mod tests {
         assert!(!in_dock(["popover"], None));
         assert!(in_dock(["popover", VERSIONS], None));
         assert!(in_dock(["popover", ALL_FILES], None));
+        assert!(in_dock(["popover", FIRST_WINDOW], None));
         assert!(!in_dock(["popover", VERSIONS], Some(VERSIONS)), "the window being closed no longer counts");
         assert!(in_dock([VERSIONS, ALL_FILES], Some(VERSIONS)), "the other one is still open");
     }
