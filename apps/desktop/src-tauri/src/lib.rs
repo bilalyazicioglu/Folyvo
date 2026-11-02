@@ -166,6 +166,16 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    // Previews reach the page as data: URLs. `cargo tauri dev` does not show this rule breaking them.
+    #[test]
+    fn the_built_app_may_show_preview_pictures() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = config["app"]["security"]["csp"].as_str().unwrap();
+        let images = csp.split(';').map(str::trim).find(|d| d.starts_with("img-src"));
+        let images = images.expect("default-src alone blocks data: pictures");
+        assert!(images.split_whitespace().any(|s| s == "data:"), "{csp}");
+    }
+
     #[test]
     fn the_app_registers_the_folyvo_url_scheme() {
         let plist = include_str!("../Info.plist");
