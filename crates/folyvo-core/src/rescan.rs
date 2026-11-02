@@ -127,7 +127,7 @@ pub fn rescan_root(engine: &Engine, root: &Path) -> Result<RescanReport> {
             }
         };
         if tracked_keys.contains(&key) {
-            let result = engine.ingest_path(path);
+            let result = engine.ingest_found(path);
             record(&mut report, path, result);
             continue;
         }
@@ -148,14 +148,14 @@ pub fn rescan_root(engine: &Engine, root: &Path) -> Result<RescanReport> {
                 Ok(()) => {
                     vanished.retain(|(_, k)| k.item_id != item);
                     report.moved += 1;
-                    let result = engine.ingest_path(path);
+                    let result = engine.ingest_found(path);
                     if matches!(result, Ok(Some(IngestOutcome::Created(_)))) {
                         report.changed += 1;
                     }
                 }
                 Err(e) => report.failed.push((path.clone(), e.to_string())),
             },
-            Ok(Match::NewItem) | Ok(Match::Ambiguous) => match engine.ingest_path(path) {
+            Ok(Match::NewItem) | Ok(Match::Ambiguous) => match engine.ingest_found(path) {
                 Ok(Some(IngestOutcome::Created(_))) => report.created += 1,
                 Ok(Some(IngestOutcome::Unchanged(_))) => report.unchanged += 1,
                 Ok(None) => report.skipped += 1,
@@ -397,5 +397,47 @@ mod tests {
     fn a_root_that_does_not_exist_is_an_error() {
         let t = setup();
         assert!(rescan_root(&t.engine, &t.dir.path().join("nope")).is_err());
+    }
+
+    fn saved_at(path: &std::path::Path, secs: u64) {
+        let when = UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        fs::File::options().write(true).open(path).unwrap().set_modified(when).unwrap();
+    }
+
+    // Reading a folder is not saving: a file last saved in March is not a save made today.
+    #[test]
+    fn a_file_found_by_a_scan_is_dated_when_it_was_last_saved() {
+        let t = setup();
+        t.clock.advance(10_000_000);
+        let root = t.dir.path().join("w");
+        fs::create_dir(&root).unwrap();
+        let file = root.join("old.docx");
+        fs::write(&file, b"one").unwrap();
+        saved_at(&file, 5_000);
+        rescan_root(&t.engine, &root).unwrap();
+        let saves = t.engine.activity(0, i64::MAX).unwrap().0;
+        assert_eq!(saves[0].at, 5_000_000);
+    }
+
+    #[test]
+    fn a_scan_never_dates_a_save_before_the_one_it_follows_or_after_now() {
+        let t = setup();
+        t.clock.advance(10_000_000);
+        let root = t.dir.path().join("w");
+        fs::create_dir(&root).unwrap();
+        let file = root.join("a.docx");
+        fs::write(&file, b"one").unwrap();
+        saved_at(&file, 5_000);
+        rescan_root(&t.engine, &root).unwrap();
+        fs::write(&file, b"two").unwrap();
+        saved_at(&file, 1_000);
+        rescan_root(&t.engine, &root).unwrap();
+        fs::write(&file, b"three").unwrap();
+        saved_at(&file, 999_999);
+        rescan_root(&t.engine, &root).unwrap();
+        let saves = t.engine.activity(0, i64::MAX).unwrap().0;
+        let dates: Vec<i64> = saves.iter().map(|s| s.at).collect();
+        let now = 10_000_000 + 1_000;
+        assert!(dates[0] == 5_000_000 && dates[1] == 5_000_000 && dates[2] <= now, "{dates:?}");
     }
 }

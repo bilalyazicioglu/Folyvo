@@ -297,6 +297,20 @@ impl Engine {
     /// A file that vanished before the debounce fired is an `Io` error; the caller treats a
     /// not-found as "mark the item missing".
     pub fn ingest_path(&self, path: &Path) -> Result<Option<IngestOutcome>> {
+        self.ingest_saved_at(path, None)
+    }
+
+    /// For a file a scan finds: it was saved when the file says, not at the moment it was read.
+    pub fn ingest_found(&self, path: &Path) -> Result<Option<IngestOutcome>> {
+        let saved_at = fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        self.ingest_saved_at(path, saved_at)
+    }
+
+    fn ingest_saved_at(&self, path: &Path, saved_at: Option<i64>) -> Result<Option<IngestOutcome>> {
         if self.is_skipped_by_policy(path)? {
             return Ok(None);
         }
@@ -308,7 +322,7 @@ impl Engine {
             None => false,
         };
         let outcome = Ingestor::new(&mut inner.store, &inner.cas, self.clock.as_ref(), self.ids.as_ref())
-            .ingest(path)?;
+            .ingest_saved_at(path, saved_at)?;
         let item = outcome.version().item_id.clone();
         self.refresh_tracked(inner, &item)?;
         match &outcome {

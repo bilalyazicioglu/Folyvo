@@ -36,6 +36,12 @@ impl<'a> Ingestor<'a> {
     }
 
     pub fn ingest(&mut self, path: &Path) -> Result<IngestOutcome> {
+        self.ingest_saved_at(path, None)
+    }
+
+    /// `saved_at` dates the new version when the save happened earlier than now, as for a file a
+    /// scan finds. A version is never dated after now or before the one it follows.
+    pub fn ingest_saved_at(&mut self, path: &Path, saved_at: Option<i64>) -> Result<IngestOutcome> {
         let key = canonical_key(path)?;
         let stored = self.store_object(path)?;
         let now = self.clock.now_unix_ms();
@@ -70,7 +76,7 @@ impl<'a> Ingestor<'a> {
             seq: previous.as_ref().map(|p| p.seq + 1).unwrap_or(1),
             content_hash: stored.hash,
             size: stored.size,
-            created_at: now,
+            created_at: saved_at.unwrap_or(now).min(now).max(previous.as_ref().map_or(0, |p| p.created_at)),
             origin: if previous.is_some() { VersionOrigin::Auto } else { VersionOrigin::Initial },
             restored_from: None,
             note: None,
