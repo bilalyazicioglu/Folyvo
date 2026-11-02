@@ -69,6 +69,8 @@ export function mockBackend(over: Partial<Backend> = {}) {
           return state.folders;
         case "stats":
           return state.stats;
+        case "missed_while_closed":
+          return 0;
         case "plugin:dialog|open":
           return state.picked;
         default:

@@ -87,6 +87,8 @@ pub fn run() {
             commands::restore,
             commands::stats,
             commands::folders,
+            commands::missed_while_closed,
+            commands::dismiss_missed,
             commands::add_folder,
             commands::remove_folder,
             commands::open_history,

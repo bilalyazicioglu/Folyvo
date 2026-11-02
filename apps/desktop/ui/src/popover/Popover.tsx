@@ -3,11 +3,12 @@ import { api, AppError, INTERNAL_ERROR } from "../api";
 import { NoFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
-import { useAction, useActivity, useFolders, useNow, useRecent } from "../queries";
+import { useAction, useActivity, useFolders, useMissed, useNow, useRecent } from "../queries";
 import { folderName } from "../files";
 import { dayBounds, hourBuckets } from "../time";
 import { DropResult, type Dropped } from "./DropResult";
 import { FileRow } from "./FileRow";
+import { MissedNotice } from "./MissedNotice";
 import { TodayStrip } from "./TodayStrip";
 
 const ROWS = 8;
@@ -53,6 +54,7 @@ export function Popover() {
   const folders = useFolders();
   const recent = useRecent();
   const activity = useActivity(from, to);
+  const missed = useMissed();
   const act = useAction();
   const observer = useRef<ResizeObserver | null>(null);
   // A callback ref: the loading shell and the loaded popover are different elements, and both must be watched.
@@ -111,6 +113,9 @@ export function Popover() {
       {folderList.length > 0 && items.length > 0 && <TodayStrip saves={saves} now={now} />}
 
       {act.error && <ErrorNotice error={act.error} onDismiss={act.clearError} />}
+      {!!missed.data && (
+        <MissedNotice count={missed.data} onDismiss={() => void act.run(() => api.dismissMissed())} />
+      )}
       {dropped && (
         <DropResult
           result={dropped}
