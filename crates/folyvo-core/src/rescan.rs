@@ -23,6 +23,16 @@ pub struct RescanReport {
     pub failed: Vec<(PathBuf, String)>,
 }
 
+/// How far a scan has come. Sizes tell how long is left better than counts: one big file can take
+/// as long as a thousand small ones.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ScanProgress {
+    pub done: usize,
+    pub total: usize,
+    pub done_bytes: u64,
+    pub total_bytes: u64,
+}
+
 fn walk(dir: &Path, files: &mut Vec<PathBuf>, failed: &mut Vec<(PathBuf, String)>) {
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
@@ -61,12 +71,25 @@ fn mtime_ms(meta: &fs::Metadata) -> i64 {
 }
 
 pub fn rescan_root(engine: &Engine, root: &Path) -> Result<RescanReport> {
+    rescan_root_reporting(engine, root, &|_| {})
+}
+
+pub fn rescan_root_reporting(
+    engine: &Engine,
+    root: &Path,
+    on_progress: &dyn Fn(ScanProgress),
+) -> Result<RescanReport> {
     if !root.is_dir() {
         return Err(CoreError::io(root, std::io::Error::from(std::io::ErrorKind::NotFound)));
     }
     let mut report = RescanReport::default();
     let mut files = Vec::new();
     walk(root, &mut files, &mut report.failed);
+
+    let size = |path: &Path| fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0);
+    let total_bytes = files.iter().map(|path| size(path)).sum();
+    let mut progress = ScanProgress { total: files.len(), total_bytes, ..ScanProgress::default() };
+    on_progress(progress);
 
     let tracked = engine.tracked_under(root)?;
     let tracked_keys: std::collections::HashSet<String> =
@@ -102,7 +125,12 @@ pub fn rescan_root(engine: &Engine, root: &Path) -> Result<RescanReport> {
         Err(e) => report.failed.push((path.to_path_buf(), e.to_string())),
     };
 
-    for path in &files {
+    for (done, path) in files.iter().enumerate() {
+        if done > 0 {
+            progress.done = done;
+            on_progress(progress);
+        }
+        progress.done_bytes += size(path);
         if is_dataless(path) {
             report.dataless.push(path.clone()); // reported, never hashed
             report.skipped += 1;
@@ -164,6 +192,10 @@ pub fn rescan_root(engine: &Engine, root: &Path) -> Result<RescanReport> {
             Err(e) => report.failed.push((path.clone(), e.to_string())),
         }
     }
+
+    progress.done = files.len();
+    progress.done_bytes = total_bytes;
+    on_progress(progress);
 
     for (index, _) in vanished {
         let t = &tracked[index];
@@ -439,5 +471,21 @@ mod tests {
         let dates: Vec<i64> = saves.iter().map(|s| s.at).collect();
         let now = 10_000_000 + 1_000;
         assert!(dates[0] == 5_000_000 && dates[1] == 5_000_000 && dates[2] <= now, "{dates:?}");
+    }
+
+    #[test]
+    fn a_scan_reports_how_far_it_has_come_and_ends_complete() {
+        let t = setup();
+        let root = t.dir.path().join("work");
+        fs::write(root.join("a.docx"), b"12345").unwrap();
+        fs::write(root.join("b.docx"), b"123").unwrap();
+        fs::write(root.join("c.docx"), b"12").unwrap();
+        let seen = std::cell::RefCell::new(Vec::new());
+        rescan_root_reporting(&t.engine, &root, &|p| seen.borrow_mut().push(p)).unwrap();
+        let seen = seen.into_inner();
+        assert!(seen.iter().all(|p| p.total == 3 && p.total_bytes == 10), "{seen:?}");
+        assert!(seen.windows(2).all(|w| w[0].done <= w[1].done), "{seen:?}");
+        let last = *seen.last().unwrap();
+        assert_eq!((last.done, last.done_bytes), (3, 10));
     }
 }

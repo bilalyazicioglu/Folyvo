@@ -327,7 +327,7 @@ describe("reaching every file", () => {
 });
 
 test("while a folder is being read the popover says so instead of waiting for a save", async () => {
-  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: true }], recent: [] });
+  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120 } }], recent: [] });
   renderWithClient(<Popover />);
   expect(await screen.findByText("Reading Documents…")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Reading your files" })).toBeInTheDocument();
@@ -336,7 +336,7 @@ test("while a folder is being read the popover says so instead of waiting for a 
 
 test("files read for the first time do not stream past while a folder is being read", async () => {
   mockBackend({
-    folders: [{ path: "/Users/a/Documents", problem: null, reading: true }],
+    folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120 } }],
     recent: [item({ name: "liblibc.rlib" })],
   });
   renderWithClient(<Popover />);

@@ -274,8 +274,19 @@ pub struct FolderDto {
     pub path: String,
     /// Set when the folder cannot be watched right now (gone, unmounted, not allowed).
     pub problem: Option<crate::errors::UserError>,
-    /// Folyvo is still reading the folder for the first time.
-    pub reading: bool,
+    /// Set while Folyvo is still reading the folder for the first time.
+    pub reading: Option<ReadingDto>,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ReadingDto {
+    pub done: u32,
+    /// Zero until Folyvo has counted the files.
+    pub total: u32,
+    /// Unknown until enough has been read to tell.
+    pub seconds_left: Option<u32>,
 }
 
 /// How a copy left: saved to a folder through Folyvo, or handed to another app.

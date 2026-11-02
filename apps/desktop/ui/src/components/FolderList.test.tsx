@@ -2,11 +2,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FolderList } from "./FolderList";
 
-const ok = { path: "/Users/a/Client work", problem: null, reading: false };
+const ok = { path: "/Users/a/Client work", problem: null, reading: null };
 const broken = {
   path: "/Volumes/Backup/Archive",
   problem: { code: "cannot_watch", title: "Folyvo can't watch that folder", hint: "Check that the folder still exists, then choose it again." },
-  reading: false,
+  reading: null,
 };
 
 test("every folder can be removed and the button names it", async () => {
@@ -37,7 +37,7 @@ test("the section summary counts the folders", () => {
 });
 
 test("a folder being read says so and cannot be stopped yet", () => {
-  render(<FolderList folders={[{ ...ok, reading: true }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+  render(<FolderList folders={[{ ...ok, reading: { done: 8986, total: 17233, secondsLeft: 120 } }]} onRemove={vi.fn()} busy={false} defaultOpen />);
   expect(screen.getByText("Reading…")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeDisabled();
 });

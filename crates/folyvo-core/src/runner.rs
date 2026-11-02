@@ -11,7 +11,7 @@ use crate::debounce::{FsEvent, KNOWN_QUIET_MS, NEW_QUIET_MS};
 use crate::engine::Engine;
 use crate::error::{CoreError, Result};
 use crate::ports::Clock;
-use crate::rescan::{rescan_root, RescanReport};
+use crate::rescan::{rescan_root_reporting, RescanReport, ScanProgress};
 use crate::watch::{Applied, WatchLoop};
 
 pub const DEFAULT_QUIET: (i64, i64) = (KNOWN_QUIET_MS, NEW_QUIET_MS);
@@ -33,6 +33,18 @@ impl Runner {
         quiet: (i64, i64),
         on_applied: OnApplied,
     ) -> Result<(Runner, RescanReport)> {
+        Self::start_reporting(engine, clock, folder, quiet, on_applied, &|_| {})
+    }
+
+    /// As `start`, telling `on_progress` how far the first scan has come.
+    pub fn start_reporting(
+        engine: Arc<Engine>,
+        clock: Arc<dyn Clock>,
+        folder: &Path,
+        quiet: (i64, i64),
+        on_applied: OnApplied,
+        on_progress: &dyn Fn(ScanProgress),
+    ) -> Result<(Runner, RescanReport)> {
         let folder = std::fs::canonicalize(folder).map_err(|e| CoreError::io(folder, e))?;
         engine.add_root(&folder)?;
 
@@ -53,7 +65,7 @@ impl Runner {
 
         // The watcher is live before the scan starts: a file saved while the scan runs is queued
         // as an event instead of being lost in the gap between the two.
-        let report = rescan_root(&engine, &folder)?;
+        let report = rescan_root_reporting(&engine, &folder, on_progress)?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
