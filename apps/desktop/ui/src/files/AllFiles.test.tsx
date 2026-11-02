@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../api";
 import { item, mockBackend, renderWithClient } from "../test-utils";
@@ -131,6 +131,46 @@ describe("AllFiles", () => {
     expect(await screen.findByText("No files named “zzz”")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add Folder…" }));
     await waitFor(() => expect(b.called("add_folder")[0]?.args.path).toBe("/Users/a/New"));
+  });
+
+  it("clears a search that found nothing, before anything else", async () => {
+    backend();
+    renderWithClient(<AllFiles />);
+    await screen.findByText("Bilal_Resume-3.pdf");
+    await userEvent.keyboard("zzz");
+    await userEvent.click(await screen.findByRole("button", { name: "Clear Search" }));
+    expect(await screen.findByText("Bilal_Resume-3.pdf")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Find a file" })).toHaveFocus();
+  });
+
+  it("keeps the keyboard working after a click on a row or the list", async () => {
+    vi.spyOn(api, "closeWindow").mockResolvedValue();
+    backend();
+    renderWithClient(<AllFiles />);
+    const search = await screen.findByRole("combobox", { name: "Find a file" });
+    await userEvent.click(await screen.findByText("Bilal_Resume-3.pdf"));
+    expect(search).toHaveFocus();
+    await userEvent.keyboard("zzz");
+    expect(search).toHaveValue("zzz");
+  });
+
+  it("does not open a file with the Enter that ends typing in an input method", async () => {
+    const b = backend();
+    renderWithClient(<AllFiles />);
+    const search = await screen.findByRole("combobox", { name: "Find a file" });
+    await screen.findByText("Bilal_Resume-3.pdf");
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    expect(b.called("open_history")).toHaveLength(0);
+  });
+
+  it("keeps the end of a long name, where similar names differ", async () => {
+    const b = backend();
+    const long = `${"Teklif_Müşteri_2026_son_hâli_".repeat(3)}v7.docx`;
+    b.state.recent = [item({ name: long, path: `/Users/a/Client work/${long}` })];
+    renderWithClient(<AllFiles />);
+    const name = await screen.findByTestId("name");
+    expect(name.textContent).toMatch(/…[^…]*v7\.docx$/);
+    expect(name).toHaveAttribute("title", long);
   });
 
   it("offers a folder when nothing is kept yet", async () => {

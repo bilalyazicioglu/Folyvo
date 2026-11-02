@@ -85,6 +85,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .all__row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 10px; border-radius: 14px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 52px; }
 .all__row:hover { background: var(--hover); }
 .all__row.is-active { background: var(--accent-soft); }
+.all__row.is-active .file__sub { color: var(--ink); }
+.all .empty .btn--link { display: block; margin: 8px auto 0; }
 .all__row.is-missing .doc { opacity: 0.55; }
 
 .versions { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 280px; background: transparent; }
