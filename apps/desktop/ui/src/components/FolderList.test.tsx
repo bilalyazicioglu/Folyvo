@@ -2,10 +2,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FolderList } from "./FolderList";
 
-const ok = { path: "/Users/a/Client work", problem: null };
+const ok = { path: "/Users/a/Client work", problem: null, reading: false };
 const broken = {
   path: "/Volumes/Backup/Archive",
   problem: { code: "cannot_watch", title: "Folyvo can't watch that folder", hint: "Check that the folder still exists, then choose it again." },
+  reading: false,
 };
 
 test("every folder can be removed and the button names it", async () => {
@@ -33,4 +34,10 @@ test("a new folder is added with its own button", async () => {
 test("the section summary counts the folders", () => {
   render(<FolderList folders={[ok, broken]} onAdd={vi.fn()} onRemove={vi.fn()} busy={false} />);
   expect(screen.getByText("Watched folders (2)")).toBeInTheDocument();
+});
+
+test("a folder being read says so and cannot be stopped yet", () => {
+  render(<FolderList folders={[{ ...ok, reading: true }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+  expect(screen.getByText("Reading…")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeDisabled();
 });

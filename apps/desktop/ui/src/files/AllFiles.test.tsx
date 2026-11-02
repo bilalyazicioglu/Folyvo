@@ -9,8 +9,8 @@ const at = (h: number) => new Date(2026, 9, 26, h).getTime();
 function backend() {
   return mockBackend({
     folders: [
-      { path: "/Users/a/Client work", problem: null },
-      { path: "/Users/a/School", problem: null },
+      { path: "/Users/a/Client work", problem: null, reading: false },
+      { path: "/Users/a/School", problem: null, reading: false },
     ],
     recent: [
       item({ itemId: "itm_01", name: "Bilal_Resume-3.pdf", path: "/Users/a/Client work/Bilal_Resume-3.pdf", latestAt: at(10) }),
@@ -50,7 +50,7 @@ describe("AllFiles", () => {
 
   it("does not name the folder when there is only one", async () => {
     const b = backend();
-    b.state.folders = [{ path: "/Users/a/Client work", problem: null }];
+    b.state.folders = [{ path: "/Users/a/Client work", problem: null, reading: false }];
     b.state.recent = b.state.recent.slice(0, 2);
     renderWithClient(<AllFiles />);
     await screen.findByText("Bilal_Resume-3.pdf");

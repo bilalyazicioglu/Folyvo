@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, AppError, INTERNAL_ERROR } from "../api";
-import { NoFolders, WaitingForSave } from "../components/EmptyState";
+import { NoFolders, ReadingFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
 import { useAction, useActivity, useFolders, useMissed, useNow, useRecent } from "../queries";
 import { folderName } from "../files";
+import type { FolderDto } from "../generated/FolderDto";
 import { dayBounds, hourBuckets } from "../time";
 import { DropResult, type Dropped } from "./DropResult";
 import { FileRow } from "./FileRow";
@@ -13,7 +14,10 @@ import { TodayStrip } from "./TodayStrip";
 
 const ROWS = 8;
 
-function keeping(folders: { path: string }[]): string {
+function keeping(folders: FolderDto[]): string {
+  const reading = folders.filter((f) => f.reading);
+  if (reading.length === 1) return `Reading ${folderName(reading[0].path)}…`;
+  if (reading.length > 1) return `Reading ${reading.length} folders…`;
   return folders.length === 1
     ? `Keeping every save in ${folderName(folders[0].path)}`
     : `Keeping every save in ${folders.length} folders`;
@@ -102,6 +106,8 @@ export function Popover() {
     return <main className="popover" aria-busy="true" aria-label="Folyvo" ref={root} />;
 
   const folderList = folders.data ?? [];
+  // Files read for the first time are not news; listing them as they arrive only looks alarming.
+  const reading = folderList.some((f) => f.reading);
   const items = recent.data ?? [];
   const saves = [...(activity.data?.saves ?? [])].sort((a, b) => a.at - b.at);
   const copies = [...(activity.data?.copies ?? [])].sort((a, b) => a.at - b.at);
@@ -110,7 +116,7 @@ export function Popover() {
 
   return (
     <main className="popover" aria-label="Folyvo" ref={root}>
-      {folderList.length > 0 && items.length > 0 && <TodayStrip saves={saves} now={now} />}
+      {!reading && folderList.length > 0 && items.length > 0 && <TodayStrip saves={saves} now={now} />}
 
       {act.error && <ErrorNotice error={act.error} onDismiss={act.clearError} />}
       {!!missed.data && (
@@ -128,6 +134,8 @@ export function Popover() {
       <div className="popover__body">
         {folderList.length === 0 ? (
           <NoFolders onChoose={() => void addFolder()} busy={act.busy} />
+        ) : reading ? (
+          <ReadingFolders />
         ) : items.length === 0 ? (
           <WaitingForSave folder={folderName(folderList[0].path)} />
         ) : (
@@ -151,7 +159,7 @@ export function Popover() {
 
       {folderList.length > 0 && (
         <footer className="popover__foot">
-          {items.length > 0 && (
+          {!reading && items.length > 0 && (
             <button type="button" className="btn btn--link popover__all" onClick={() => void api.openAllFiles()}>
               All Files…
             </button>

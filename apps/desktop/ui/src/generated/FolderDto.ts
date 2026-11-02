@@ -5,4 +5,8 @@ export type FolderDto = { path: string,
 /**
  * Set when the folder cannot be watched right now (gone, unmounted, not allowed).
  */
-problem: UserError | null, };
+problem: UserError | null, 
+/**
+ * Folyvo is still reading the folder for the first time.
+ */
+reading: boolean, };
