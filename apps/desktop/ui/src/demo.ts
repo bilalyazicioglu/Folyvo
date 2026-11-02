@@ -135,6 +135,7 @@ export function demoHandlers() {
     stats: (_: Args) => ({ items: 3, versions: 17, bytes: 21_400_000 }),
     folders: (_: Args) => [{ path: "/Users/you/Client work", problem: null }],
     missed_while_closed: (_: Args) => 0,
+    suggested_folders: (_: Args) => ["/Users/you/Documents", "/Users/you/Desktop"],
     name_version: (a: Args) => {
       for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.note = (a.note as string | null) ?? null; });
     },
