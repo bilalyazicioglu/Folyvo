@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::dto::EngineEventDto;
 use crate::runtime::Notifier;
@@ -51,12 +50,11 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     });
 
     let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
-    TrayIconBuilder::with_id("folyvo")
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .icon_as_template(true)
         .tooltip("Folyvo")
         .on_tray_icon_event(move |tray, event| {
-            tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
             let TrayIconEvent::Click {
                 button: MouseButton::Left, button_state: MouseButtonState::Up, ..
             } = event
@@ -68,9 +66,7 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
             let visible = window.is_visible().unwrap_or(false);
             match gate.lock().unwrap().on_tray_click(now_ms(), visible) {
                 TrayAction::Show => {
-                    let _ = window.move_window(Position::TrayBottomCenter);
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                    let _ = show_popover(app);
                     let _ = app.emit("engine-event", EngineEventDto::Resync);
                 }
                 TrayAction::Hide => {
@@ -115,6 +111,11 @@ pub const ALL_FILES: &str = "files";
 
 /// The label of the window shown on first launch.
 pub const FIRST_WINDOW: &str = "first";
+
+const TRAY_ID: &str = "folyvo";
+
+/// Logical points between the popover and the menu bar.
+const POPOVER_GAP: f64 = 6.0;
 
 /// Whether Folyvo should be in the Dock and in Command-Tab: while one of its windows is open, so a
 /// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
@@ -279,16 +280,72 @@ pub fn show_which(app: &AppHandle, path: &std::path::Path) -> tauri::Result<()> 
 fn show_popover(app: &AppHandle) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window("popover") else { return Ok(()) };
     // Before the menu bar icon was ever clicked its position is unknown; the top right is where it lives.
-    if window.move_window(Position::TrayBottomCenter).is_err() {
-        let _ = window.move_window(Position::TopRight);
+    if let Some((x, y)) = popover_position(app) {
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
     window.show()?;
     window.set_focus()
 }
 
+fn popover_position(app: &AppHandle) -> Option<(i32, i32)> {
+    let icon = app.tray_by_id(TRAY_ID)?.rect().ok().flatten().map(|rect| {
+        let (at, size) = (rect.position.to_physical::<i32>(1.0), rect.size.to_physical::<u32>(1.0));
+        ((at.x, at.y), (size.width, size.height))
+    });
+    let monitor = match icon {
+        Some(((x, y), _)) => app.monitor_from_point(f64::from(x), f64::from(y)).ok().flatten(),
+        None => None,
+    }
+    .or_else(|| app.primary_monitor().ok().flatten())?;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    Some(popover_origin(
+        icon,
+        ((area.position.x, area.position.y), (area.size.width, area.size.height)),
+        (crate::fit::POPOVER_WIDTH * scale).round() as i32,
+        (POPOVER_GAP * scale).round() as i32,
+    ))
+}
+
+/// Centred under the icon with a little air, and never past the side of the screen. Without an
+/// icon position it sits in the top right, where menu bar icons live.
+fn popover_origin(
+    icon: Option<((i32, i32), (u32, u32))>,
+    ((area_x, area_y), (area_width, _)): ((i32, i32), (u32, u32)),
+    width: i32,
+    gap: i32,
+) -> (i32, i32) {
+    let right_most = area_x + area_width as i32 - width - gap;
+    match icon {
+        Some(((x, y), (icon_width, icon_height))) => {
+            let centred = x + icon_width as i32 / 2 - width / 2;
+            (centred.clamp(area_x + gap, right_most), y + icon_height as i32 + gap)
+        }
+        None => (right_most, area_y + gap),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const AREA: ((i32, i32), (u32, u32)) = ((0, 74), (3024, 1890));
+
+    #[test]
+    fn the_popover_opens_centred_under_the_icon_with_a_gap() {
+        assert_eq!(popover_origin(Some(((1000, 0), (60, 74))), AREA, 760, 12), (650, 86));
+    }
+
+    #[test]
+    fn the_popover_stays_on_the_screen_when_the_icon_is_near_a_side() {
+        assert_eq!(popover_origin(Some(((2960, 0), (60, 74))), AREA, 760, 12).0, 2252);
+        assert_eq!(popover_origin(Some(((-400, 0), (60, 74))), AREA, 760, 12).0, 12);
+    }
+
+    #[test]
+    fn without_an_icon_position_the_popover_sits_in_the_top_right() {
+        assert_eq!(popover_origin(None, AREA, 760, 12), (2252, 86));
+    }
 
     #[test]
     fn folyvo_is_in_the_dock_only_while_one_of_its_windows_is_open() {
