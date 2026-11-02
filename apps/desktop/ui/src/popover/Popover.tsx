@@ -135,7 +135,7 @@ export function Popover() {
         {folderList.length === 0 ? (
           <NoFolders onChoose={() => void addFolder()} busy={act.busy} />
         ) : reading ? (
-          <ReadingFolders />
+          <ReadingFolders folders={folderList} />
         ) : items.length === 0 ? (
           <WaitingForSave folder={folderName(folderList[0].path)} />
         ) : (

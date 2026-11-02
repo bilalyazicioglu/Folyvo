@@ -243,6 +243,12 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .folders .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folders .problem { color: var(--danger); font-size: 12px; }
 .folders .reading { color: var(--muted); font-size: 12px; }
+.reading-bar { display: block; width: 100%; height: 6px; margin: 12px 0 8px; appearance: none; border: 0; border-radius: 3px; overflow: hidden; background: var(--soft-line); accent-color: var(--accent); }
+.reading-bar::-webkit-progress-bar { background: var(--soft-line); }
+.reading-bar::-webkit-progress-value { background: var(--accent); }
+.empty--reading { padding: 20px 20px 14px; }
+.empty--reading p { margin: 10px 0 0; }
+.reading-count { display: flex; justify-content: space-between; gap: 12px; min-height: 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .confirm { margin-top: 8px; padding: 10px 12px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 0.5px var(--soft-line); }
 .confirm p { margin: 0 0 10px; }

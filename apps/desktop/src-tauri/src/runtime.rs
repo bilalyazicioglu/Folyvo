@@ -1,23 +1,61 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use folyvo_core::engine::{Engine, RecvError};
 use folyvo_core::ports::{Clock, IdGen};
+use folyvo_core::rescan::ScanProgress;
 use folyvo_core::runner::{OnApplied, Runner};
 use folyvo_core::watch::Applied;
 use folyvo_core::CoreError;
 
 use crate::api::AppApi;
 use crate::changes::ChangeWorker;
-use crate::dto::{EngineEventDto, FolderDto};
+use crate::dto::{EngineEventDto, FolderDto, ReadingDto};
 use crate::errors::UserError;
 
 /// Receives every event the UI should hear about. The Tauri layer forwards them to the webviews.
 pub trait Notifier: Send + Sync {
     fn notify(&self, event: EngineEventDto);
+}
+
+/// How often a read in progress tells the UI how far it has come.
+const PROGRESS_EVERY: Duration = Duration::from_millis(500);
+
+/// Too little has been read before this to say how long the rest will take.
+const ESTIMATE_AFTER_MS: i64 = 3_000;
+
+/// How long the rest takes at the rate so far. The rate is uneven both ways: big files fill the
+/// bytes quickly while thousands of small ones take long for their size, so the longer answer wins.
+fn seconds_left(elapsed_ms: i64, p: ScanProgress) -> Option<u32> {
+    if elapsed_ms < ESTIMATE_AFTER_MS || p.done == 0 || p.done_bytes == 0 {
+        return None;
+    }
+    let at_rate = |done: u64, total: u64| {
+        u128::from(total.saturating_sub(done)) * elapsed_ms as u128 / u128::from(done)
+    };
+    let by_files = at_rate(p.done as u64, p.total as u64);
+    let by_bytes = at_rate(p.done_bytes, p.total_bytes);
+    Some((by_files.max(by_bytes) / 1_000) as u32)
+}
+
+struct Reading {
+    started_ms: i64,
+    progress: ScanProgress,
+}
+
+impl Reading {
+    fn dto(&self, now_ms: i64) -> ReadingDto {
+        let p = self.progress;
+        ReadingDto {
+            done: p.done as u32,
+            total: p.total as u32,
+            seconds_left: seconds_left(now_ms - self.started_ms, p),
+        }
+    }
 }
 
 pub struct AppRuntime {
@@ -27,7 +65,7 @@ pub struct AppRuntime {
     runners: Mutex<HashMap<PathBuf, Runner>>,
     problems: Mutex<HashMap<PathBuf, UserError>>,
     /// Folders whose first read has not ended. Reading one can take minutes.
-    reading: Mutex<HashSet<PathBuf>>,
+    reading: Mutex<HashMap<PathBuf, Reading>>,
     notifier: Arc<dyn Notifier>,
     changes: ChangeWorker,
     missed: AtomicUsize,
@@ -60,12 +98,12 @@ impl AppRuntime {
             quiet,
             runners: Mutex::new(HashMap::new()),
             problems: Mutex::new(HashMap::new()),
-            reading: Mutex::new(HashSet::new()),
+            reading: Mutex::new(HashMap::new()),
             notifier,
             missed: AtomicUsize::new(0),
         });
         for root in runtime.engine.roots()? {
-            match runtime.start_runner(&root) {
+            match runtime.start_runner(&root, &|_| {}) {
                 Ok(changed) => {
                     runtime.missed.fetch_add(changed, Ordering::SeqCst);
                 }
@@ -105,15 +143,32 @@ impl AppRuntime {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         self.problems.lock().unwrap().remove(folder);
         self.problems.lock().unwrap().remove(&canonical);
-        if self.runners.lock().unwrap().contains_key(&canonical)
-            || !self.reading.lock().unwrap().insert(canonical.clone())
-        {
+        if self.runners.lock().unwrap().contains_key(&canonical) {
             return Ok(());
+        }
+        {
+            let mut reading = self.reading.lock().unwrap();
+            if reading.contains_key(&canonical) {
+                return Ok(());
+            }
+            let started_ms = self.clock.now_unix_ms();
+            reading.insert(canonical.clone(), Reading { started_ms, progress: ScanProgress::default() });
         }
         self.notifier.notify(EngineEventDto::RootsChanged);
         let rt = self.clone();
         thread::spawn(move || {
-            if let Err(problem) = rt.start_runner(&canonical) {
+            let told = Mutex::new(Instant::now());
+            let on_progress = |progress: ScanProgress| {
+                if let Some(reading) = rt.reading.lock().unwrap().get_mut(&canonical) {
+                    reading.progress = progress;
+                }
+                let mut told = told.lock().unwrap();
+                if told.elapsed() >= PROGRESS_EVERY {
+                    *told = Instant::now();
+                    rt.notifier.notify(EngineEventDto::RootsChanged);
+                }
+            };
+            if let Err(problem) = rt.start_runner(&canonical, &on_progress) {
                 rt.problems.lock().unwrap().insert(canonical.clone(), problem);
             }
             rt.reading.lock().unwrap().remove(&canonical);
@@ -125,7 +180,7 @@ impl AppRuntime {
     /// A read cannot be stopped halfway, so a folder being read stays until the read ends.
     pub fn remove_folder(&self, folder: &Path) -> Result<(), UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        if self.reading.lock().unwrap().contains(&canonical) {
+        if self.reading.lock().unwrap().contains_key(&canonical) {
             return Err(UserError::new(
                 "folder_busy",
                 "Folyvo is still reading that folder",
@@ -143,20 +198,21 @@ impl AppRuntime {
     pub fn folders(&self) -> Vec<FolderDto> {
         let problems = self.problems.lock().unwrap();
         let reading = self.reading.lock().unwrap();
+        let now = self.clock.now_unix_ms();
         self.engine
             .roots()
             .unwrap_or_default()
             .into_iter()
             .map(|root| FolderDto {
                 problem: problems.get(&root).cloned(),
-                reading: reading.contains(&root),
+                reading: reading.get(&root).map(|r| r.dto(now)),
                 path: root.to_string_lossy().into_owned(),
             })
             .collect()
     }
 
     /// Returns how many kept files the first scan found changed.
-    fn start_runner(&self, folder: &Path) -> Result<usize, UserError> {
+    fn start_runner(&self, folder: &Path, on_progress: &dyn Fn(ScanProgress)) -> Result<usize, UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         if self.runners.lock().unwrap().contains_key(&canonical) {
             return Ok(0);
@@ -166,8 +222,14 @@ impl AppRuntime {
                 eprintln!("folyvo: could not save {}: {reason}", path.display());
             }
         });
-        let (runner, report) =
-            Runner::start(self.engine.clone(), self.clock.clone(), folder, self.quiet, on_applied)?;
+        let (runner, report) = Runner::start_reporting(
+            self.engine.clone(),
+            self.clock.clone(),
+            folder,
+            self.quiet,
+            on_applied,
+            on_progress,
+        )?;
         // Only the folder itself: one unreadable folder inside it must not stop the rest being kept.
         if report.failed.iter().any(|(path, _)| path == runner.folder()) {
             let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
@@ -220,7 +282,7 @@ mod tests {
 
     fn add_and_read(rt: &Arc<AppRuntime>, folder: &std::path::Path) {
         rt.add_folder(folder).unwrap();
-        wait_until("the folder to be read", || rt.folders().iter().all(|f| !f.reading));
+        wait_until("the folder to be read", || rt.folders().iter().all(|f| f.reading.is_none()));
     }
 
     fn recent_names(rt: &AppRuntime) -> Vec<String> {
@@ -332,6 +394,22 @@ mod tests {
         assert_eq!(rt.missed_while_closed(), 0, "nothing changed since the last launch");
     }
 
+    #[test]
+    fn the_time_left_follows_the_rate_so_far_once_there_is_enough_to_tell() {
+        let at = |done, done_bytes| ScanProgress { done, total: 100, done_bytes, total_bytes: 100 };
+        assert_eq!(seconds_left(10_000, at(25, 25)), Some(30));
+        assert_eq!(seconds_left(10_000, at(100, 100)), Some(0));
+        assert_eq!(seconds_left(2_999, at(25, 25)), None, "too early to tell");
+        assert_eq!(seconds_left(10_000, at(0, 0)), None, "nothing read yet");
+    }
+
+    // A few big files fill the bytes early; thousands of small ones are still ahead.
+    #[test]
+    fn most_of_the_bytes_done_does_not_promise_the_end_while_most_files_remain() {
+        let p = ScanProgress { done: 10, total: 100, done_bytes: 90, total_bytes: 100 };
+        assert_eq!(seconds_left(10_000, p), Some(90));
+    }
+
     // A folder can take minutes to read; adding it must not wait, so a failure arrives on its row.
     #[test]
     fn a_folder_that_cannot_be_read_is_added_and_shows_its_problem() {
@@ -342,7 +420,7 @@ mod tests {
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
         let (rt, _rx) = start(dir.path());
         let added = rt.add_folder(&folder);
-        wait_until("the read to end", || rt.folders().iter().all(|f| !f.reading));
+        wait_until("the read to end", || rt.folders().iter().all(|f| f.reading.is_none()));
         let problem = rt.folders()[0].problem.clone();
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(added, Ok(()));
@@ -358,8 +436,10 @@ mod tests {
         add_and_read(&rt, &folder);
         let canonical = fs::canonicalize(&folder).unwrap();
         rt.runners.lock().unwrap().remove(&canonical);
-        rt.reading.lock().unwrap().insert(canonical);
-        assert!(rt.folders()[0].reading);
+        let progress = ScanProgress { done: 1, total: 4, done_bytes: 25, total_bytes: 100 };
+        rt.reading.lock().unwrap().insert(canonical, Reading { started_ms: 0, progress });
+        let reading = rt.folders()[0].reading.clone().unwrap();
+        assert_eq!((reading.done, reading.total), (1, 4));
         assert_eq!(rt.remove_folder(&folder).unwrap_err().code, "folder_busy");
         assert_eq!(rt.folders().len(), 1);
     }
