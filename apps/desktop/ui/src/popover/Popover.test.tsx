@@ -325,3 +325,23 @@ describe("reaching every file", () => {
     expect(screen.queryByRole("button", { name: "All Files…" })).not.toBeInTheDocument();
   });
 });
+
+test("while a folder is being read the popover says so instead of waiting for a save", async () => {
+  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: true }], recent: [] });
+  renderWithClient(<Popover />);
+  expect(await screen.findByText("Reading Documents…")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Reading your files" })).toBeInTheDocument();
+  expect(screen.queryByText("Waiting for the first save")).not.toBeInTheDocument();
+});
+
+test("files read for the first time do not stream past while a folder is being read", async () => {
+  mockBackend({
+    folders: [{ path: "/Users/a/Documents", problem: null, reading: true }],
+    recent: [item({ name: "liblibc.rlib" })],
+  });
+  renderWithClient(<Popover />);
+  expect(await screen.findByRole("heading", { name: "Reading your files" })).toBeInTheDocument();
+  expect(screen.queryByText("liblibc.rlib")).not.toBeInTheDocument();
+  expect(screen.queryByText("Today")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "All Files…" })).not.toBeInTheDocument();
+});

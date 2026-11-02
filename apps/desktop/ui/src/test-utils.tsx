@@ -48,7 +48,7 @@ export function mockBackend(over: Partial<Backend> = {}) {
   const state: Backend = {
     recent: [],
     history: {},
-    folders: [{ path: "/Users/a/Client work", problem: null }],
+    folders: [{ path: "/Users/a/Client work", problem: null, reading: false }],
     stats: { items: 0, versions: 0, bytes: 0 },
     handlers: {},
     picked: null,

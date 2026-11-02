@@ -242,6 +242,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .folders ul { list-style: none; margin: 0; padding: 0; }
 .folders .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folders .problem { color: var(--danger); font-size: 12px; }
+.folders .reading { color: var(--muted); font-size: 12px; }
 
 .confirm { margin-top: 8px; padding: 10px 12px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 0.5px var(--soft-line); }
 .confirm p { margin: 0 0 10px; }

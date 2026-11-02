@@ -10,6 +10,15 @@ export function NoFolders({ onChoose, busy }: { onChoose: () => void; busy: bool
   );
 }
 
+export function ReadingFolders() {
+  return (
+    <section className="empty">
+      <h2>Reading your files</h2>
+      <p>This can take a few minutes. You can keep working. Your files show up here when it has finished.</p>
+    </section>
+  );
+}
+
 export function WaitingForSave({ folder }: { folder: string }) {
   return (
     <section className="empty">

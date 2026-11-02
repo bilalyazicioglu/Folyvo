@@ -274,6 +274,8 @@ pub struct FolderDto {
     pub path: String,
     /// Set when the folder cannot be watched right now (gone, unmounted, not allowed).
     pub problem: Option<crate::errors::UserError>,
+    /// Folyvo is still reading the folder for the first time.
+    pub reading: bool,
 }
 
 /// How a copy left: saved to a folder through Folyvo, or handed to another app.
