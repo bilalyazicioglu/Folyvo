@@ -106,13 +106,30 @@ export function demoHandlers() {
       const h = histories[id];
       return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false };
     });
+  const olderFiles = (): ItemSummaryDto[] =>
+    [
+      ["Client work/Drafts", "Proposal_draft_2.docx", 2, false],
+      ["Client work/Drafts", "Proposal_draft_1.docx", 4, false],
+      ["Client work", "Contract_Acme.pdf", 26, false],
+      ["Client work", "Meeting_notes.txt", 80, true],
+      ["School/Spring", "Thesis_final_v3.docx", 200, false],
+      ["School/Spring", "Thesis_final_v2.docx", 500, false],
+    ].map(([folder, name, hoursAgo, missing], i) => ({
+      itemId: `itm_old${i}`,
+      name: name as string,
+      path: `/Users/you/${folder}/${name}`,
+      latestSeq: 2,
+      latestAt: now - (hoursAgo as number) * 60 * MIN,
+      missing: missing as boolean,
+    }));
   const byId = (a: Args) => histories[a.item as string] ?? [];
   const copies: CopyDto[] = [
     { itemId: "itm_demo1", versionId: "ver_08", kind: "handed", service: "mail", targetPath: null, at: now - 90 * MIN },
   ];
 
   return {
-    recent: (_: Args) => recentOf(),
+    // The popover asks for the latest few; All Files asks for everything.
+    recent: (a: Args) => ((a.limit as number) > 1000 ? [...recentOf(), ...olderFiles()] : recentOf()),
     item: (a: Args) => recentOf().find((i) => i.itemId === a.item),
     history: (a: Args) => byId(a),
     stats: (_: Args) => ({ items: 3, versions: 17, bytes: 21_400_000 }),

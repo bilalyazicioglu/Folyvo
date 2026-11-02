@@ -110,10 +110,13 @@ fn glass(_window: &tauri::WebviewWindow) {}
 /// The label of the window that shows one file's saved times.
 pub const VERSIONS: &str = "versions";
 
-/// Whether Folyvo should be in the Dock and in Command-Tab: while a versions window is open, so a
+/// The label of the window that lists every kept file.
+pub const ALL_FILES: &str = "files";
+
+/// Whether Folyvo should be in the Dock and in Command-Tab: while one of its windows is open, so a
 /// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
 pub fn in_dock<'a>(open: impl IntoIterator<Item = &'a str>, closing: Option<&str>) -> bool {
-    open.into_iter().any(|label| label == VERSIONS && closing != Some(VERSIONS))
+    open.into_iter().any(|label| (label == VERSIONS || label == ALL_FILES) && closing != Some(label))
 }
 
 /// Shows or hides Folyvo in the Dock and Command-Tab to match the windows open now.
@@ -168,6 +171,36 @@ pub fn open_versions(app: &AppHandle, item: &str, action: Option<&str>) -> tauri
     Ok(())
 }
 
+/// Opens the window that lists every kept file, or brings it back.
+pub fn open_all_files(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(ALL_FILES) {
+        w.show()?;
+        w.set_focus()?;
+        follow_windows(app, None);
+        return Ok(());
+    }
+    let builder = WebviewWindowBuilder::new(app, ALL_FILES, WebviewUrl::App("index.html?view=files".into()))
+        .title("All Files")
+        .inner_size(520.0, 640.0)
+        .min_inner_size(400.0, 320.0);
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(22.0, 26.0))
+        .transparent(true);
+    let window = builder.build()?;
+    window_glass(&window);
+    #[cfg(target_os = "macos")]
+    {
+        let size = window.inner_size()?;
+        window.set_size(tauri::PhysicalSize::new(size.width + 1, size.height))?;
+        window.set_size(size)?;
+    }
+    follow_windows(app, None);
+    window.set_focus()
+}
+
 /// Liquid Glass behind the whole versions window; the page lays the stage over it as an opaque panel
 /// and leaves the saved times on the glass. Falls back to the sidebar material before macOS 26.
 #[cfg(target_os = "macos")]
@@ -213,9 +246,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn folyvo_is_in_the_dock_only_while_a_versions_window_is_open() {
+    fn folyvo_is_in_the_dock_only_while_one_of_its_windows_is_open() {
         assert!(!in_dock(["popover"], None));
         assert!(in_dock(["popover", VERSIONS], None));
+        assert!(in_dock(["popover", ALL_FILES], None));
         assert!(!in_dock(["popover", VERSIONS], Some(VERSIONS)), "the window being closed no longer counts");
+        assert!(in_dock([VERSIONS, ALL_FILES], Some(VERSIONS)), "the other one is still open");
     }
 }
