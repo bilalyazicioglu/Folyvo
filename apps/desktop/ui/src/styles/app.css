@@ -76,8 +76,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 
 /* The versions window: a table the pages lie on, the saved times in the sidebar's glass. */
 .all { height: 100%; display: flex; flex-direction: column; background: transparent; }
-.all__head { flex: none; display: flex; align-items: center; min-height: 52px; padding: 10px 14px 8px 88px; }
-.all__search { flex: 1; min-width: 0; min-height: 32px; padding: 0 12px; border: 0; border-radius: 16px; background: var(--field); color: var(--ink); font: inherit; outline-offset: 1px; }
+.all__head { flex: none; display: flex; align-items: center; height: 52px; padding: 0 16px 0 96px; }
+.all__search { flex: 1; min-width: 0; height: 28px; padding: 0 12px; border: 0; border-radius: 14px; -webkit-appearance: none; appearance: none; background: var(--field); color: var(--ink); font: inherit; outline-offset: 1px; }
 .all__search::placeholder { color: var(--muted); }
 .all__search::-webkit-search-cancel-button { display: none; }
 .all__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
