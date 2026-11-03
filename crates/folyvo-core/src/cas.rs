@@ -47,14 +47,53 @@ impl Cas {
         if !kind.is_file() {
             return Err(CoreError::NotAFile(src.to_path_buf())); // never clone a whole package into tmp
         }
+        if kind.len() > MAX_FILE_BYTES {
+            return Err(CoreError::TooLarge { size: kind.len(), limit: MAX_FILE_BYTES });
+        }
         let snapshot = self.root.join("tmp").join(format!("snap-{}", uuid::Uuid::new_v4().simple()));
         if reflink_copy::reflink(src, &snapshot).is_ok() {
-            // The snapshot is private to us, so it cannot change while we read it.
-            let stored = self.put_file_with_hook(&snapshot, &mut || {});
-            let _ = fs::remove_file(&snapshot);
-            return stored;
+            match self.keep_snapshot(&snapshot) {
+                Ok(stored) => return Ok(stored),
+                // Whatever got in the way of keeping the clone, a plain copy can still do the job.
+                Err(_) => {
+                    let _ = fs::remove_file(&snapshot);
+                }
+            }
         }
         self.put_file_with_hook(src, &mut || {})
+    }
+
+    /// Makes a clone of a file the stored object, so a file that never changes takes no extra
+    /// space. The clone is private to us, so it cannot change while we read it.
+    fn keep_snapshot(&self, snapshot: &Path) -> Result<Stored> {
+        let mut file = File::open(snapshot).map_err(|e| CoreError::io(snapshot, e))?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = vec![0u8; CHUNK];
+        let mut size: u64 = 0;
+        loop {
+            let n = file.read(&mut buf).map_err(|e| CoreError::io(snapshot, e))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            size += n as u64;
+        }
+        let hash = ContentHash::from_blake3(hasher.finalize());
+        let final_path = self.path_of(&hash);
+        if final_path.is_file() {
+            fs::remove_file(snapshot).map_err(|e| CoreError::io(snapshot, e))?;
+            return Ok(Stored { hash, size, newly_stored: false });
+        }
+        // A clone brings the file's attributes and mode along. Exports are made from the object, so
+        // the attributes must stay out, and a read-only mode must not get in the way later.
+        crate::xattrs::clear_xattrs(snapshot).map_err(|e| CoreError::io(snapshot, e))?;
+        make_private(snapshot)?;
+        file.sync_all().map_err(|e| CoreError::io(snapshot, e))?;
+        let shard_dir = final_path.parent().expect("object path has a parent").to_path_buf();
+        fs::create_dir_all(&shard_dir).map_err(|e| CoreError::io(&shard_dir, e))?;
+        fs::rename(snapshot, &final_path).map_err(|e| CoreError::io(&final_path, e))?;
+        sync_dir(&shard_dir);
+        Ok(Stored { hash, size, newly_stored: true })
     }
 
     /// `after_first_read` runs once, after the first chunk has been read. Tests use it to
@@ -211,6 +250,20 @@ fn restrict_to_owner(dir: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn restrict_to_owner(_dir: &Path) -> Result<()> {
     Ok(())
+}
+
+#[cfg(unix)]
+fn make_private(file: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(file, fs::Permissions::from_mode(0o600)).map_err(|e| CoreError::io(file, e))
+}
+
+#[cfg(not(unix))]
+fn make_private(file: &Path) -> Result<()> {
+    let mut permissions = fs::metadata(file).map_err(|e| CoreError::io(file, e))?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)] // Windows has no world-writable bit to open up
+    permissions.set_readonly(false);
+    fs::set_permissions(file, permissions).map_err(|e| CoreError::io(file, e))
 }
 
 #[cfg(unix)]
@@ -403,6 +456,80 @@ mod tests {
         let sub = dir.path().join("Report.pages");
         fs::create_dir(&sub).unwrap();
         assert!(matches!(cas.put_file(&sub), Err(CoreError::NotAFile(_))));
+    }
+
+    // A clone keeps the source's modification time and a copy does not, so this tells them apart.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_apfs_the_kept_object_is_a_clone_of_the_file() {
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"shared blocks");
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        File::options().write(true).open(&src).unwrap().set_modified(old).unwrap();
+        let stored = cas.put_file(&src).unwrap();
+        assert!(stored.newly_stored);
+        assert_eq!(fs::metadata(cas.path_of(&stored.hash)).unwrap().modified().unwrap(), old);
+    }
+
+    #[test]
+    fn changing_the_file_later_leaves_the_kept_object_as_it_was() {
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"first words");
+        let stored = cas.put_file(&src).unwrap();
+        let mut file = File::options().write(true).open(&src).unwrap();
+        file.write_all(b"other").unwrap();
+        drop(file);
+        cas.verify(&stored.hash).unwrap();
+        assert_eq!(fs::read(cas.path_of(&stored.hash)).unwrap(), b"first words");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_file_is_kept_as_a_private_object_that_can_be_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"read only");
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o444)).unwrap();
+        let stored = cas.put_file(&src).unwrap();
+        let mode = fs::metadata(cas.path_of(&stored.hash)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        cas.remove_object(&stored.hash).unwrap();
+        assert!(!cas.contains(&stored.hash));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_object_does_not_carry_the_files_attributes() {
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"tagged");
+        if xattr::set(&src, "user.folyvo.test", b"from the file").is_err() {
+            eprintln!("skipped: this filesystem has no user xattrs");
+            return;
+        }
+        let stored = cas.put_file(&src).unwrap();
+        assert_eq!(xattr::get(cas.path_of(&stored.hash), "user.folyvo.test").unwrap(), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_locked_file_is_still_kept() {
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"locked in Finder");
+        let chflags = |flag: &str, path: &std::path::Path| {
+            assert!(std::process::Command::new("chflags").arg(flag).arg(path).status().unwrap().success());
+        };
+        chflags("uchg", &src);
+        let result = cas.put_file(&src);
+        chflags("nouchg", &src);
+        for entry in fs::read_dir(cas.root().join("tmp")).unwrap() {
+            let _ = std::process::Command::new("chflags").arg("nouchg").arg(entry.unwrap().path()).status();
+        }
+        let stored = result.unwrap();
+        let object = cas.path_of(&stored.hash);
+        let _ = std::process::Command::new("chflags").arg("nouchg").arg(&object).status();
+        assert_eq!(fs::read(&object).unwrap(), b"locked in Finder");
+        cas.sweep_tmp().unwrap();
+        assert_eq!(fs::read_dir(cas.root().join("tmp")).unwrap().count(), 0, "no snapshot left behind");
     }
 
     // Characterisation (finding F-APFS-1): APFS supports copy-on-write clones inside one volume.
