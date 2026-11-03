@@ -290,7 +290,8 @@ impl Engine {
         }
         let ignored = nearest.map(|root_key| {
             let (root_key, key) = (Path::new(&root_key), Path::new(&key));
-            is_ignored_under(root_key, key) || is_in_generated_folder(root_key, key, path)
+            is_ignored_under(root_key, key)
+                || (!self.is_tracked(path) && is_in_generated_folder(root_key, key, path))
         });
         if ignored.unwrap_or_else(|| is_ignored(path)) || crate::dataless::is_dataless(path) {
             return Ok(true); // hashing a placeholder would force an iCloud download
