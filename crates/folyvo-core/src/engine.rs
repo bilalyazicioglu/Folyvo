@@ -11,7 +11,7 @@ use crate::error::{CoreError, Result};
 use crate::events;
 use crate::export::{ExportResult, Exporter};
 use crate::handed;
-use crate::ignore::{is_ignored, is_ignored_under};
+use crate::ignore::{is_ignored, is_ignored_under, is_in_generated_folder};
 use crate::ingest::{IngestOutcome, Ingestor};
 use crate::lock::VaultLock;
 use crate::model::{version_codes, ContentHash, ItemId, ShareEvent, Version, VersionId, VersionOrigin};
@@ -278,15 +278,20 @@ impl Engine {
         }
         let g = self.lock();
         let c = g.store.conn();
-        let mut ignored = None;
+        // Roots can nest, and the nearest one decides: choosing a folder is a request to keep it.
+        let mut nearest: Option<String> = None;
         for root in repo::list_roots(c)? {
             if let Ok(root_key) = canonical_key(Path::new(&root)) {
-                if Path::new(&key).starts_with(&root_key) {
-                    ignored = Some(is_ignored_under(Path::new(&root_key), Path::new(&key)));
-                    break;
+                let deeper = nearest.as_ref().is_none_or(|n| root_key.len() > n.len());
+                if deeper && Path::new(&key).starts_with(&root_key) {
+                    nearest = Some(root_key);
                 }
             }
         }
+        let ignored = nearest.map(|root_key| {
+            let (root_key, key) = (Path::new(&root_key), Path::new(&key));
+            is_ignored_under(root_key, key) || is_in_generated_folder(root_key, key, path)
+        });
         if ignored.unwrap_or_else(|| is_ignored(path)) || crate::dataless::is_dataless(path) {
             return Ok(true); // hashing a placeholder would force an iCloud download
         }
