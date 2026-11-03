@@ -7,7 +7,7 @@ use crate::dataless::is_dataless;
 use crate::engine::Engine;
 use crate::error::{CoreError, Result};
 use crate::export::file_hash;
-use crate::ignore::{is_generated_folder, is_ignored, is_package};
+use crate::ignore::{is_generated_folder, is_ignored, is_in_generated_folder, is_package};
 use crate::ingest::IngestOutcome;
 use crate::reconcile::{match_candidate, Candidate, Known, Match};
 
@@ -86,12 +86,27 @@ pub fn rescan_root_reporting(
     let mut files = Vec::new();
     walk(root, &mut files, &mut report.failed);
 
+    let tracked = engine.tracked_under(root)?;
+    // The walk does not enter generated folders, but a file kept before its folder became one is
+    // still kept: missing a save is worse than keeping too much.
+    let root_key = canonical_key(root)?;
+    files.extend(
+        tracked
+            .iter()
+            .map(|t| &t.path)
+            .filter(|path| {
+                fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file())
+                    && canonical_key(path)
+                        .is_ok_and(|key| is_in_generated_folder(Path::new(&root_key), Path::new(&key), path))
+            })
+            .cloned(),
+    );
+
     let size = |path: &Path| fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0);
     let total_bytes = files.iter().map(|path| size(path)).sum();
     let mut progress = ScanProgress { total: files.len(), total_bytes, ..ScanProgress::default() };
     on_progress(progress);
 
-    let tracked = engine.tracked_under(root)?;
     let tracked_keys: std::collections::HashSet<String> =
         tracked.iter().filter_map(|t| canonical_key(&t.path).ok()).collect();
 
@@ -514,20 +529,36 @@ mod tests {
     }
 
     #[test]
-    fn files_kept_before_a_folder_became_generated_stay_and_stop_changing() {
+    fn a_file_kept_before_its_folder_became_generated_keeps_getting_versions() {
         let t = setup();
         t.engine.add_root(&t.root()).unwrap();
-        let p = t.put("build/main.o", b"one");
+        let p = t.put("build/main.docx", b"one");
         t.rescan();
         t.put("build/CACHEDIR.TAG", CACHE_TAG);
-        fs::write(&p, b"two").unwrap();
+        let new_file = t.put("build/new.o", b"made later");
 
+        fs::write(&p, b"two").unwrap();
         let r = t.rescan();
 
-        assert_eq!((r.created, r.changed, r.marked_missing), (0, 0, 0), "{r:?}");
-        assert!(t.engine.ingest_path(&p).unwrap().is_none());
-        assert!(t.engine.is_tracked(&p));
-        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+        assert_eq!((r.created, r.changed, r.marked_missing), (0, 1, 0), "{r:?}");
+        assert!(!t.engine.is_tracked(&new_file), "a new file in a generated folder is still skipped");
+        fs::write(&p, b"three").unwrap();
+        assert!(matches!(t.engine.ingest_path(&p).unwrap(), Some(IngestOutcome::Created(_))));
+        assert!(t.engine.ingest_path(&new_file).unwrap().is_none());
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 3);
+    }
+
+    #[test]
+    fn a_kept_file_in_a_hidden_folder_is_not_brought_back_by_the_scan() {
+        let t = setup();
+        let p = t.put(".hidden/a.docx", b"one");
+        t.engine.ingest_path(&p).unwrap();
+        t.engine.add_root(&t.root()).unwrap();
+
+        fs::write(&p, b"two").unwrap();
+        let r = t.rescan();
+
+        assert_eq!((r.changed, r.unchanged, r.skipped), (0, 0, 0), "{r:?}");
     }
 
     #[test]
