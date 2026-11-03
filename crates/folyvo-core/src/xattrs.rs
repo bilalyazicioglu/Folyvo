@@ -14,6 +14,20 @@ pub fn copy_xattrs(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Removes the attributes the file may have, except the ones macOS will not let go of.
+#[cfg(unix)]
+pub fn clear_xattrs(path: &Path) -> std::io::Result<()> {
+    for name in xattr::list(path)? {
+        let _ = xattr::remove(path, &name);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn clear_xattrs(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// Windows has no extended attributes to carry over.
 #[cfg(not(unix))]
 pub fn copy_xattrs(_from: &Path, _to: &Path) -> std::io::Result<()> {
