@@ -2,6 +2,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
+#root { display: flow-root; }
 body { font: 14px/1.4 var(--font); color: var(--ink); background: transparent; -webkit-font-smoothing: antialiased; }
 button { font: inherit; cursor: pointer; }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -28,7 +29,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .doc--big b { height: 22px; border-radius: 0 0 7px 7px; font-size: 12px; }
 
 /* The popover window carries the native glass; the page only tints it. */
-.popover { position: relative; display: flex; flex-direction: column; padding: 4px 6px 2px; border-radius: 24px; background: color-mix(in srgb, var(--bg) var(--glass-tint), transparent); }
+/* The margin matches POPOVER_GAP and POPOVER_SHADOW_ROOM in fit.rs: the glass sits inset so its shadow is not cut off. */
+.popover { position: relative; display: flex; flex-direction: column; margin: 6px 40px 40px; padding: 4px 6px 2px; border-radius: 24px; background: color-mix(in srgb, var(--bg) var(--glass-tint), transparent); }
 .popover__body { max-height: 440px; overflow-y: auto; }
 .popover__foot { margin-top: 4px; padding: 2px 10px 4px; border-top: 0.5px solid var(--soft-line); color: var(--muted); font-size: 12px; }
 .popover__all { display: block; width: 100%; min-height: 36px; padding: 0 4px; text-align: left; text-decoration: none; color: var(--ink); }

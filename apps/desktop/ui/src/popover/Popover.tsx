@@ -77,8 +77,16 @@ export function Popover() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") void api.hidePopover();
     };
+    // The window is larger than the glass, to leave room for its shadow. That clear space is outside.
+    const onPress = (e: MouseEvent) => {
+      if (e.target instanceof Element && !e.target.closest(".popover")) void api.hidePopover();
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onPress);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onPress);
+    };
   }, []);
 
   useEffect(() => {

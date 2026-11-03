@@ -233,7 +233,8 @@ pub fn open_all_files(app: AppHandle) -> Result<(), UserError> {
 #[tauri::command]
 pub fn fit_popover(app: AppHandle, height: f64) {
     if let Some(w) = app.get_webview_window("popover") {
-        let size = tauri::LogicalSize::new(crate::fit::POPOVER_WIDTH, crate::fit::popover_height(height));
+        let size =
+            tauri::LogicalSize::new(crate::fit::POPOVER_WINDOW_WIDTH, crate::fit::popover_height(height));
         let _ = w.set_size(size);
     }
 }

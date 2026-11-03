@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api, type DropEvent } from "../api";
 import type { CopyDto } from "../generated/CopyDto";
@@ -105,6 +105,16 @@ test("a copy today shows in the sub line and as a filled dot", async () => {
     expect(within(open).getAllByRole("listitem").filter((li) => li.dataset.copied === "true")).toHaveLength(1),
   );
   expect(within(open).getByText("Attached in Mail 10:14")).toBeInTheDocument();
+});
+
+test("pressing the clear space around the popover closes it, and pressing inside does not", async () => {
+  const b = backend();
+  const { container } = renderWithClient(<Popover />);
+  await screen.findByRole("button", { name: LONG });
+  fireEvent.mouseDown(screen.getByRole("button", { name: LONG }));
+  expect(b.called("hide_popover")).toHaveLength(0);
+  fireEvent.mouseDown(container);
+  await waitFor(() => expect(b.called("hide_popover")).toHaveLength(1));
 });
 
 test("open history opens that file", async () => {

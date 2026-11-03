@@ -25,7 +25,7 @@ impl Notifier for TauriNotifier {
 pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let popover = WebviewWindowBuilder::new(app, "popover", WebviewUrl::App("index.html".into()))
         .title("Folyvo")
-        .inner_size(crate::fit::POPOVER_WIDTH, 560.0)
+        .inner_size(crate::fit::POPOVER_WINDOW_WIDTH, crate::fit::popover_height(560.0))
         .decorations(false)
         .transparent(true)
         .resizable(false)
@@ -96,6 +96,26 @@ fn glass(window: &tauri::WebviewWindow) {
             Some(24.0),
         );
     }
+    inset_glass(window);
+}
+
+/// Both materials go in as the window's backmost view and fill it. Inset, they keep their distance
+/// from the window's edges as it resizes, and the glass's shadow has room to show.
+#[cfg(target_os = "macos")]
+fn inset_glass(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::NSView;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    let Ok(view) = window.ns_view() else { return };
+    // SAFETY: Tauri's content view for this window, used on the main thread during setup.
+    let view = unsafe { &*view.cast::<NSView>() };
+    let Some(material) = view.subviews().firstObject() else { return };
+    let (room, gap) = (crate::fit::POPOVER_SHADOW_ROOM, crate::fit::POPOVER_GAP);
+    let bounds = view.bounds();
+    let below = if view.isFlipped() { gap } else { room };
+    material.setFrame(NSRect::new(
+        NSPoint::new(bounds.origin.x + room, bounds.origin.y + below),
+        NSSize::new(bounds.size.width - 2.0 * room, bounds.size.height - gap - room),
+    ));
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -113,9 +133,6 @@ pub const ALL_FILES: &str = "files";
 pub const FIRST_WINDOW: &str = "first";
 
 const TRAY_ID: &str = "folyvo";
-
-/// Logical points between the popover and the menu bar.
-const POPOVER_GAP: f64 = 6.0;
 
 /// Whether Folyvo should be in the Dock and in Command-Tab: while one of its windows is open, so a
 /// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
@@ -303,26 +320,30 @@ fn popover_position(app: &AppHandle) -> Option<(i32, i32)> {
         icon,
         ((area.position.x, area.position.y), (area.size.width, area.size.height)),
         (crate::fit::POPOVER_WIDTH * scale).round() as i32,
-        (POPOVER_GAP * scale).round() as i32,
+        (crate::fit::POPOVER_GAP * scale).round() as i32,
+        (crate::fit::POPOVER_SHADOW_ROOM * scale).round() as i32,
     ))
 }
 
 /// Centred under the icon with a little air, and never past the side of the screen. Without an
-/// icon position it sits in the top right, where menu bar icons live.
+/// icon position it sits in the top right, where menu bar icons live. `width` and `gap` place the
+/// glass. The window is larger than the glass: it starts `room` further left and `gap` higher.
 fn popover_origin(
     icon: Option<((i32, i32), (u32, u32))>,
     ((area_x, area_y), (area_width, _)): ((i32, i32), (u32, u32)),
     width: i32,
     gap: i32,
+    room: i32,
 ) -> (i32, i32) {
     let right_most = area_x + area_width as i32 - width - gap;
-    match icon {
+    let (x, y) = match icon {
         Some(((x, y), (icon_width, icon_height))) => {
             let centred = x + icon_width as i32 / 2 - width / 2;
             (centred.clamp(area_x + gap, right_most), y + icon_height as i32 + gap)
         }
         None => (right_most, area_y + gap),
-    }
+    };
+    (x - room, y - gap)
 }
 
 #[cfg(test)]
@@ -333,18 +354,29 @@ mod tests {
 
     #[test]
     fn the_popover_opens_centred_under_the_icon_with_a_gap() {
-        assert_eq!(popover_origin(Some(((1000, 0), (60, 74))), AREA, 760, 12), (650, 86));
+        assert_eq!(popover_origin(Some(((1000, 0), (60, 74))), AREA, 760, 12, 0), (650, 74));
+    }
+
+    #[test]
+    fn the_room_for_the_shadow_does_not_move_the_glass() {
+        assert_eq!(
+            popover_origin(Some(((1000, 0), (60, 74))), AREA, 760, 12, 32),
+            (618, 74),
+            "the window starts right below the menu bar"
+        );
+        assert_eq!(popover_origin(Some(((-400, 0), (60, 74))), AREA, 760, 12, 32).0, -20);
+        assert_eq!(popover_origin(None, AREA, 760, 12, 32), (2220, 74));
     }
 
     #[test]
     fn the_popover_stays_on_the_screen_when_the_icon_is_near_a_side() {
-        assert_eq!(popover_origin(Some(((2960, 0), (60, 74))), AREA, 760, 12).0, 2252);
-        assert_eq!(popover_origin(Some(((-400, 0), (60, 74))), AREA, 760, 12).0, 12);
+        assert_eq!(popover_origin(Some(((2960, 0), (60, 74))), AREA, 760, 12, 0).0, 2252);
+        assert_eq!(popover_origin(Some(((-400, 0), (60, 74))), AREA, 760, 12, 0).0, 12);
     }
 
     #[test]
     fn without_an_icon_position_the_popover_sits_in_the_top_right() {
-        assert_eq!(popover_origin(None, AREA, 760, 12), (2252, 86));
+        assert_eq!(popover_origin(None, AREA, 760, 12, 0), (2252, 74));
     }
 
     #[test]
