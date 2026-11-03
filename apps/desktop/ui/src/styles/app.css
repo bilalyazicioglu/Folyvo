@@ -33,7 +33,9 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .popover { position: relative; display: flex; flex-direction: column; margin: 6px 40px 40px; padding: 4px 6px 2px; border-radius: 24px; background: color-mix(in srgb, var(--bg) var(--glass-tint), transparent); }
 .popover__body { max-height: 440px; overflow-y: auto; }
 .popover__foot { margin-top: 4px; padding: 2px 10px 4px; border-top: 0.5px solid var(--soft-line); color: var(--muted); font-size: 12px; }
-.popover__all { display: block; width: 100%; min-height: 36px; padding: 0 4px; text-align: left; text-decoration: none; color: var(--ink); }
+.popover__actions { display: flex; align-items: center; justify-content: space-between; }
+.popover__all { min-height: 36px; padding: 0 4px; text-decoration: none; color: var(--ink); }
+.popover__quit { min-height: 36px; margin-left: auto; padding: 0 4px; text-decoration: none; color: var(--muted); font-size: 12px; }
 .popover__keeping { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .popover__keeping .btn--link { min-height: 36px; text-decoration: none; color: var(--ink); }
 .popover .folders { flex: 1; min-width: 0; margin: 0; }

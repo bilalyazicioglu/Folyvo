@@ -168,6 +168,7 @@ export function demoHandlers() {
     "plugin:dialog|open": (_: Args) => "/Users/you/Desktop",
     open_history: (_: Args) => undefined,
     hide_popover: (_: Args) => undefined,
+    quit: (_: Args) => undefined,
     fit_popover: (_: Args) => undefined,
     open_version: (_: Args) => undefined,
     set_dialog_open: (_: Args) => undefined,

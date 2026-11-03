@@ -82,6 +82,7 @@ export const api = {
   suggestedFolders: () => call<string[]>("suggested_folders"),
   finishFirstWindow: () => call<void>("finish_first_window"),
   hidePopover: () => call<void>("hide_popover"),
+  quit: () => call<void>("quit"),
   /** The popover window follows the height of its content. */
   fitPopover: (height: number) => call<void>("fit_popover", { height }),
   reveal: (path: string) => call<void>("reveal", { path }),

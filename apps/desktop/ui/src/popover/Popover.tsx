@@ -165,21 +165,26 @@ export function Popover() {
         )}
       </div>
 
-      {folderList.length > 0 && (
-        <footer className="popover__foot">
-          {!reading && items.length > 0 && (
+      <footer className="popover__foot">
+        <div className="popover__actions">
+          {folderList.length > 0 && !reading && items.length > 0 && (
             <button type="button" className="btn btn--link popover__all" onClick={() => void api.openAllFiles()}>
               All Files…
             </button>
           )}
+          <button type="button" className="btn btn--link popover__quit" onClick={() => void api.quit()}>
+            Quit Folyvo
+          </button>
+        </div>
+        {folderList.length > 0 && (
           <div className="popover__keeping">
             <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} summary={keeping(folderList)} />
             <button type="button" className="btn btn--link" disabled={act.busy} onClick={() => void addFolder()}>
               Add Folder…
             </button>
           </div>
-        </footer>
-      )}
+        )}
+      </footer>
 
       {dragging && (
         <div className="drop-overlay" aria-live="polite">
