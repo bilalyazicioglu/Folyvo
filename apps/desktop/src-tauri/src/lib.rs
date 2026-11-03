@@ -97,6 +97,7 @@ pub fn run() {
             commands::suggested_folders,
             commands::finish_first_window,
             commands::hide_popover,
+            commands::quit,
             commands::fit_popover,
             commands::set_dialog_open,
             commands::reveal,

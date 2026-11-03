@@ -117,6 +117,25 @@ test("pressing the clear space around the popover closes it, and pressing inside
   await waitFor(() => expect(b.called("hide_popover")).toHaveLength(1));
 });
 
+test("quit is there with a kept folder and quits the app", async () => {
+  const b = backend();
+  renderWithClient(<Popover />);
+  await userEvent.click(await screen.findByRole("button", { name: "Quit Folyvo" }));
+  await waitFor(() => expect(b.called("quit")).toHaveLength(1));
+});
+
+test("quit is there before any folder is kept", async () => {
+  mockBackend({ folders: [] });
+  renderWithClient(<Popover />);
+  expect(await screen.findByRole("button", { name: "Quit Folyvo" })).toBeInTheDocument();
+});
+
+test("quit is there while a folder is being read", async () => {
+  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null } }] });
+  renderWithClient(<Popover />);
+  expect(await screen.findByRole("button", { name: "Quit Folyvo" })).toBeInTheDocument();
+});
+
 test("open history opens that file", async () => {
   const b = backend();
   renderWithClient(<Popover />);

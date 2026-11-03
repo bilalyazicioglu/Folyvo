@@ -255,6 +255,11 @@ pub fn hide_popover(app: AppHandle) {
     }
 }
 
+#[tauri::command]
+pub fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 /// Shows a file in Finder. Only paths that exist are accepted, and the path is passed as one
 /// argument, never through a shell.
 #[tauri::command]
