@@ -29,13 +29,24 @@ fn read_pages(path: &Path, limits: &Limits, max_pages: usize) -> Result<Vec<Stri
     use objc2_foundation::{NSString, NSURL};
     use objc2_pdf_kit::PDFDocument;
 
-    let started = std::time::Instant::now();
     if std::fs::metadata(path).map_err(|_| Unreadable::Malformed)?.len() > limits.file_bytes {
         return Err(Unreadable::TooLarge);
     }
     let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().ok_or(Unreadable::Malformed)?));
     // SAFETY: a file URL; PDFKit reads the file and returns nil when it is not a PDF it can open.
-    let doc = unsafe { PDFDocument::initWithURL(PDFDocument::alloc(), &url) }.ok_or(Unreadable::Malformed)?;
+    read_opened(limits, max_pages, || unsafe { PDFDocument::initWithURL(PDFDocument::alloc(), &url) })
+}
+
+#[cfg(target_os = "macos")]
+fn read_opened(
+    limits: &Limits,
+    max_pages: usize,
+    open: impl FnOnce() -> Option<objc2::rc::Retained<objc2_pdf_kit::PDFDocument>>,
+) -> Result<Vec<String>, Unreadable> {
+    let doc = open().ok_or(Unreadable::Malformed)?;
+    // The clock starts here: PDFKit takes seconds to load for the first PDF a process opens, however
+    // small the file is, and a file cannot be stopped while it opens.
+    let started = std::time::Instant::now();
     // SAFETY: plain queries on a document this thread owns.
     let count = unsafe { doc.pageCount() };
     if count > max_pages {
@@ -119,6 +130,44 @@ pub(crate) mod tests {
         let p = pdf(d.path(), "a.pdf", &["Intro", "Total 10200"]);
         let pages = super::page_texts(&p, &folyvo_compare::Limits::DEFAULT).unwrap();
         assert_eq!(pages.iter().map(|p| p.trim()).collect::<Vec<_>>(), vec!["Intro", "Total 10200"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn open_after(
+        wait: std::time::Duration,
+        path: &Path,
+    ) -> Option<objc2::rc::Retained<objc2_pdf_kit::PDFDocument>> {
+        use objc2::AnyThread;
+        use objc2_foundation::{NSString, NSURL};
+        use objc2_pdf_kit::PDFDocument;
+        std::thread::sleep(wait);
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+        unsafe { PDFDocument::initWithURL(PDFDocument::alloc(), &url) }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_time_taken_to_open_a_pdf_does_not_count_against_the_limit() {
+        use std::time::Duration;
+        let d = tempfile::tempdir().unwrap();
+        let p = pdf(d.path(), "a.pdf", &["Intro", "Total"]);
+        let limits =
+            folyvo_compare::Limits { time: Duration::from_millis(500), ..folyvo_compare::Limits::DEFAULT };
+        let pages = super::read_opened(&limits, 10, || open_after(Duration::from_millis(600), &p)).unwrap();
+        assert_eq!(pages.len(), 2);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reading_the_pages_is_still_held_to_the_limit() {
+        use std::time::Duration;
+        let d = tempfile::tempdir().unwrap();
+        let p = pdf(d.path(), "a.pdf", &["Intro", "Total"]);
+        let limits = folyvo_compare::Limits { time: Duration::ZERO, ..folyvo_compare::Limits::DEFAULT };
+        assert_eq!(
+            super::read_opened(&limits, 10, || open_after(Duration::ZERO, &p)),
+            Err(folyvo_compare::Unreadable::TooSlow)
+        );
     }
 
     #[cfg(target_os = "macos")]
