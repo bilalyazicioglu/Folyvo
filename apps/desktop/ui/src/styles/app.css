@@ -61,6 +61,10 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .file__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .file__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; }
 .file__sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file__sub--parts { display: flex; column-gap: 0.25em; }
+/* The folder gives way first, and its comma with it, so the rest of the line, with its times, stays whole. */
+.file__folder { overflow: hidden; text-overflow: ellipsis; }
+.file__rest { flex: none; max-width: calc(100% - 0.25em); overflow: hidden; text-overflow: ellipsis; }
 .file__when { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .file__day { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
 .file__day .btn--primary { align-self: flex-start; min-height: 28px; margin-top: 2px; padding: 0 14px; }

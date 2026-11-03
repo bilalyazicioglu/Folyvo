@@ -21,6 +21,12 @@ export function folderName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** The name of the folder holding a file; null when its path is not known or nothing holds it. */
+export function parentFolderName(path: string | null): string | null {
+  const parts = path?.split("/").filter(Boolean) ?? [];
+  return parts.length > 1 ? parts[parts.length - 2] : null;
+}
+
 export function sizeLabel(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
