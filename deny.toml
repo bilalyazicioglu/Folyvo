@@ -1,15 +1,11 @@
 [graph]
 all-features = true
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is pulled in by Tauri's Linux GTK backend, which Folyvo never builds (macOS only). It is unmaintained, not vulnerable." },
-  { id = "RUSTSEC-2026-0370", reason = "zvariant comes with zbus, which the notification plugin uses only on Linux; Folyvo never builds for Linux. Unmaintained, not vulnerable." },
-  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive comes with zbus, which the notification plugin uses only on Linux; Folyvo never builds for Linux. Unmaintained, not vulnerable." },
-  { id = "RUSTSEC-2026-0371", reason = "zbus_names comes with zbus, which the notification plugin uses only on Linux; Folyvo never builds for Linux. Unmaintained, not vulnerable." },
-]
+ignore = []
 
 [licenses]
 version = 2
@@ -17,9 +13,7 @@ allow = [
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
-  "BSD-2-Clause",
   "BSD-3-Clause",
-  "ISC",
   "Unicode-3.0",
   "CC0-1.0",
   "MPL-2.0",
