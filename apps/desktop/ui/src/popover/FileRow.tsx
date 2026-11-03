@@ -3,6 +3,7 @@ import type { ItemSummaryDto } from "../generated/ItemSummaryDto";
 import type { SaveDto } from "../generated/SaveDto";
 import { copyLabel } from "../copies";
 import { DocIcon } from "../components/DocIcon";
+import { parentFolderName } from "../files";
 import { useCopies } from "../queries";
 import { clock, middleTruncate, whenLabel } from "../time";
 
@@ -24,7 +25,7 @@ interface Props {
 function subLine(item: ItemSummaryDto, saves: SaveDto[], newestCopy: CopyDto | undefined, now: number): string {
   const kept =
     saves.length === 0
-      ? `Last saved ${whenLabel(item.latestAt, now)}`
+      ? whenLabel(item.latestAt, now)
       : `${saves.length} ${saves.length === 1 ? "save" : "saves"} today`;
   return newestCopy ? `${kept}, ${copyLabel(newestCopy)} ${clock(newestCopy.at)}` : kept;
 }
@@ -37,6 +38,8 @@ export function FileRow({ item, saves, copies, now, start, open, onToggle, onOpe
   const span = Math.max(1, now - start);
   const regionId = `today-${item.itemId}`;
   const subId = `sub-${item.itemId}`;
+  const sub = subLine(item, saves, newestCopy, now);
+  const folder = parentFolderName(item.path);
   return (
     <li className={`file${open ? " is-open" : ""}`}>
       <button
@@ -53,8 +56,14 @@ export function FileRow({ item, saves, copies, now, start, open, onToggle, onOpe
           <span className="file__name" title={item.name} aria-hidden="true">
             {middleTruncate(item.name, NAME_MAX)}
           </span>
-          <span id={subId} className="file__sub" aria-hidden="true">
-            {subLine(item, saves, newestCopy, now)}
+          <span
+            id={subId}
+            className="file__sub file__sub--parts"
+            title={item.path ?? sub}
+            aria-hidden="true"
+          >
+            {folder && <span className="file__folder">{folder},</span>}{" "}
+            <span className="file__rest">{sub}</span>
           </span>
         </span>
         <span className="file__when" aria-hidden="true">{saves.length > 0 ? clock(item.latestAt) : ""}</span>

@@ -8,6 +8,8 @@ import { Popover } from "./Popover";
 const at = (d: number, h: number, m: number) => new Date(2026, 9, d, h, m).getTime();
 const NOW = at(26, 10, 42);
 const LONG = "Teklif_Müşteri_2026_son_hâli.docx";
+/** The row whose second line says this. */
+const rowSaying = (line: string) => screen.findByRole("button", { description: line });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -97,8 +99,8 @@ test("only one row is open at a time", async () => {
 test("a copy today shows in the sub line and as a filled dot", async () => {
   backend();
   renderWithClient(<Popover />);
-  expect(await screen.findByText("3 saves today, Attached in Mail 10:14")).toBeInTheDocument();
-  expect(screen.getByText("Last saved Yesterday 17:05")).toBeInTheDocument();
+  expect(await rowSaying("Client work, 3 saves today, Attached in Mail 10:14")).toBeInTheDocument();
+  expect(await rowSaying("Client work, Yesterday 17:05")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: LONG }));
   const open = screen.getByRole("region", { name: `${LONG} today` });
   await waitFor(() =>
@@ -134,6 +136,50 @@ test("quit is there while a folder is being read", async () => {
   mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null } }] });
   renderWithClient(<Popover />);
   expect(await screen.findByRole("button", { name: "Quit Folyvo" })).toBeInTheDocument();
+});
+
+test("a save today with no copy keeps the folder and the count", async () => {
+  const b = mockBackend({ recent: [item({ latestAt: at(26, 10, 12) })] });
+  b.state.handlers.activity = () => ({
+    saves: [{ itemId: "itm_01", versionId: "ver_01", at: at(26, 10, 12) }],
+    copies: [],
+  });
+  renderWithClient(<Popover />);
+  expect(await rowSaying("Client work, 1 save today")).toBeInTheDocument();
+});
+
+test("a file with no path has no folder on its line", async () => {
+  const b = mockBackend({ recent: [item({ path: null, latestAt: at(25, 17, 5) })] });
+  b.state.handlers.activity = () => ({ saves: [], copies: [] });
+  renderWithClient(<Popover />);
+  const row = await rowSaying("Yesterday 17:05");
+  expect(within(row).getByTitle("Yesterday 17:05")).toHaveClass("file__sub");
+});
+
+test("a long folder name can give way to the rest of the line and is read out in full", async () => {
+  const b = mockBackend({
+    recent: [
+      item({
+        name: "Report.docx",
+        path: "/Users/a/Very_long_project_folder_name/Report.docx",
+        latestAt: at(25, 17, 5),
+      }),
+    ],
+  });
+  b.state.handlers.activity = () => ({ saves: [], copies: [] });
+  renderWithClient(<Popover />);
+  const row = await rowSaying("Very_long_project_folder_name, Yesterday 17:05");
+  // The comma belongs to the folder, so the rest of the line never starts with one.
+  expect(within(row).getByText("Very_long_project_folder_name,")).toHaveClass("file__folder");
+  expect(within(row).getByText("Yesterday 17:05")).toHaveClass("file__rest");
+});
+
+test("a row's tooltip tells folders of the same name apart by the file's path", async () => {
+  const b = mockBackend({ recent: [item({ path: "/Users/a/Project/src/main.c", latestAt: at(25, 17, 5) })] });
+  b.state.handlers.activity = () => ({ saves: [], copies: [] });
+  renderWithClient(<Popover />);
+  const row = await rowSaying("src, Yesterday 17:05");
+  expect(within(row).getByTitle("/Users/a/Project/src/main.c")).toHaveClass("file__sub");
 });
 
 test("open history opens that file", async () => {
@@ -215,7 +261,7 @@ test("dropping a folder is refused plainly", async () => {
 test("no word ready or sent appears", async () => {
   backend();
   const { container } = renderWithClient(<Popover />);
-  await screen.findByText("3 saves today, Attached in Mail 10:14");
+  await rowSaying("Client work, 3 saves today, Attached in Mail 10:14");
   await userEvent.click(screen.getByRole("button", { name: LONG }));
   await screen.findByText("Attached in Mail 10:14");
   expect(container.textContent ?? "").not.toMatch(/\bready\b|\bsent\b/i);
@@ -271,7 +317,7 @@ test("a row reads out its name and its day, and each dot its time", async () => 
   backend();
   renderWithClient(<Popover />);
   const row = await screen.findByRole("button", { name: LONG });
-  expect(row).toHaveAccessibleDescription("3 saves today, Attached in Mail 10:14");
+  expect(row).toHaveAccessibleDescription("Client work, 3 saves today, Attached in Mail 10:14");
   await userEvent.click(row);
   const open = screen.getByRole("region", { name: `${LONG} today` });
   await waitFor(() => expect(within(open).getByRole("listitem", { name: "09:58, a copy left" })).toBeInTheDocument());

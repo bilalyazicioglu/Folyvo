@@ -1,4 +1,4 @@
-import { fileKind, folderName, sizeLabel } from "./files";
+import { fileKind, folderName, parentFolderName, sizeLabel } from "./files";
 
 test.each([
   ["Proposal.docx", "doc"],
@@ -24,4 +24,10 @@ test("sizes read like a person would say them", () => {
 test("a folder is named by its last part", () => {
   expect(folderName("/Users/a/Client work")).toBe("Client work");
   expect(folderName("/Users/a/Client work/")).toBe("Client work");
+});
+
+test("a file's folder is the one holding it, when there is one", () => {
+  expect(parentFolderName("/Users/a/FreeRTOS/main.c")).toBe("FreeRTOS");
+  expect(parentFolderName("/main.c")).toBeNull();
+  expect(parentFolderName(null)).toBeNull();
 });
