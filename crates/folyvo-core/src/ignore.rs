@@ -49,6 +49,10 @@ pub fn is_generated_folder(dir: &Path) -> bool {
 
 fn has_cache_tag(dir: &Path) -> bool {
     let tag = dir.join("CACHEDIR.TAG");
+    // Only a regular file: opening a FIFO would block the scan forever.
+    if !std::fs::symlink_metadata(&tag).is_ok_and(|meta| meta.is_file()) {
+        return false;
+    }
     if is_dataless(&tag) {
         return false; // reading a placeholder would force an iCloud download
     }
@@ -174,6 +178,40 @@ mod tests {
             std::fs::write(&tag, bytes).unwrap();
             assert_eq!(is_generated_folder(dir.path()), generated, "{:?}", String::from_utf8_lossy(bytes));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_tag_that_is_not_a_regular_file_does_not_block_or_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("elsewhere");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
+        assert!(made.success());
+        std::os::unix::fs::symlink(&fifo, dir.path().join("CACHEDIR.TAG")).unwrap();
+        let linked = dir.path().to_path_buf();
+
+        let plain = tempfile::tempdir().unwrap();
+        let made =
+            std::process::Command::new("mkfifo").arg(plain.path().join("CACHEDIR.TAG")).status().unwrap();
+        assert!(made.success());
+        let direct = plain.path().to_path_buf();
+
+        let (sent, got) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sent.send((is_generated_folder(&linked), is_generated_folder(&direct))).unwrap();
+        });
+        let answer = got.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(answer, Ok((false, false)), "opening the tag blocked or it counted");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_a_real_cache_tag_does_not_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("elsewhere");
+        std::fs::write(&real, CACHE_TAG_SIGNATURE).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("CACHEDIR.TAG")).unwrap();
+        assert!(!is_generated_folder(dir.path()));
     }
 
     #[test]
