@@ -21,12 +21,10 @@ allow = [
   "BSD-3-Clause",
   "ISC",
   "Unicode-3.0",
-  "Unicode-DFS-2016",
   "CC0-1.0",
   "MPL-2.0",
   "Zlib",
   "0BSD",
-  "BSL-1.0",
   "GPL-3.0-or-later",
 ]
 confidence-threshold = 0.9
