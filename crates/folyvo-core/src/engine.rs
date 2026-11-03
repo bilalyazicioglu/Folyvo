@@ -276,11 +276,11 @@ impl Engine {
         if Path::new(&key).starts_with(&self.vault_key) {
             return Ok(true);
         }
-        let g = self.lock();
-        let c = g.store.conn();
+        // The disk is read without the lock, so a slow folder cannot hold up the rest of the app.
+        let roots = repo::list_roots(self.lock().store.conn())?;
         // Roots can nest, and the nearest one decides: choosing a folder is a request to keep it.
         let mut nearest: Option<String> = None;
-        for root in repo::list_roots(c)? {
+        for root in roots {
             if let Ok(root_key) = canonical_key(Path::new(&root)) {
                 let deeper = nearest.as_ref().is_none_or(|n| root_key.len() > n.len());
                 if deeper && Path::new(&key).starts_with(&root_key) {
@@ -295,7 +295,7 @@ impl Engine {
         if ignored.unwrap_or_else(|| is_ignored(path)) || crate::dataless::is_dataless(path) {
             return Ok(true); // hashing a placeholder would force an iCloud download
         }
-        repo::is_export_target(c, &key)
+        repo::is_export_target(self.lock().store.conn(), &key)
     }
 
     /// `Ok(None)` means the path is deliberately not versioned (see `is_skipped_by_policy`).
