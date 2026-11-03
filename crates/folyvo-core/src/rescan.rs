@@ -7,7 +7,7 @@ use crate::dataless::is_dataless;
 use crate::engine::Engine;
 use crate::error::{CoreError, Result};
 use crate::export::file_hash;
-use crate::ignore::{is_ignored, is_package};
+use crate::ignore::{is_generated_folder, is_ignored, is_package};
 use crate::ingest::IngestOutcome;
 use crate::reconcile::{match_candidate, Candidate, Known, Match};
 
@@ -53,7 +53,7 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>, failed: &mut Vec<(PathBuf, String)
             continue;
         }
         if kind.is_dir() {
-            if !is_package(&path) {
+            if !is_package(&path) && !is_generated_folder(&path) {
                 walk(&path, files, failed);
             }
         } else if kind.is_file() {
@@ -423,6 +423,111 @@ mod tests {
         assert_eq!(r.created, 0, "{r:?}");
         assert_eq!(t.engine.vault_stats().unwrap().items, 1);
         assert!(p.exists());
+    }
+
+    const CACHE_TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55\n# Made by a build tool.\n";
+
+    #[test]
+    fn the_scan_and_the_watcher_both_skip_generated_folders() {
+        let t = setup();
+        t.engine.add_root(&t.root()).unwrap();
+        let kept = t.put("report.docx", b"words");
+        t.put("target/CACHEDIR.TAG", CACHE_TAG);
+        let skipped = [
+            t.put("app/node_modules/pkg/index.js", b"a"),
+            t.put("web/Node_Modules/index.js", b"b"),
+            t.put("target/debug/main.o", b"c"),
+            t.put("other/Cache/deep/er/blob", b"d"),
+            t.root().join("target/CACHEDIR.TAG"),
+        ];
+        t.put("other/Cache/CACHEDIR.TAG", CACHE_TAG);
+
+        let r = t.rescan();
+
+        assert_eq!(r.created, 1, "{r:?}");
+        assert!(t.engine.is_tracked(&kept));
+        for path in &skipped {
+            assert!(!t.engine.is_tracked(path), "the scan kept {path:?}");
+            assert!(t.engine.ingest_path(path).unwrap().is_none(), "the watcher kept {path:?}");
+        }
+        assert_eq!(t.engine.vault_stats().unwrap().items, 1);
+    }
+
+    #[test]
+    fn folders_that_only_look_generated_are_kept_by_the_scan_and_the_watcher() {
+        let t = setup();
+        t.engine.add_root(&t.root()).unwrap();
+        t.put("mine/CACHEDIR.TAG", b"I named a note this.");
+        t.put("short/CACHEDIR.TAG", b"Signature: 8a47");
+        let kept = [
+            t.put("target/debug/main.o", b"a"),
+            t.put("build/chapter.docx", b"b"),
+            t.put("dist/flyer.pdf", b"c"),
+            t.put("mine/plan.docx", b"d"),
+            t.put("short/plan.docx", b"e"),
+            t.put("notes/node_modules", b"a file, not a folder"),
+            t.put("node_modules.docx", b"f"),
+        ];
+
+        t.rescan();
+
+        for path in &kept {
+            assert!(t.engine.is_tracked(path), "the scan skipped {path:?}");
+        }
+        let other = t.put("target/debug/later.o", b"g");
+        assert!(t.engine.ingest_path(&other).unwrap().is_some(), "the watcher skipped {other:?}");
+    }
+
+    #[test]
+    fn a_folder_chosen_directly_is_kept_even_when_it_is_generated() {
+        let t = setup();
+        let tagged = t.root().join("target");
+        t.put("target/CACHEDIR.TAG", CACHE_TAG);
+        let object = t.put("target/debug/main.o", b"a");
+        let modules = t.root().join("node_modules");
+        let script = t.put("node_modules/index.js", b"b");
+
+        for (root, file) in [(&tagged, &object), (&modules, &script)] {
+            t.engine.add_root(root).unwrap();
+            let r = rescan_root(&t.engine, root).unwrap();
+            assert!(r.created >= 1, "{r:?}");
+            assert!(t.engine.is_tracked(file), "the scan skipped {file:?}");
+            assert!(t.engine.ingest_path(file).unwrap().is_some(), "the watcher skipped {file:?}");
+            t.engine.remove_root(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_generated_folder_chosen_inside_another_kept_folder_is_kept() {
+        let t = setup();
+        t.engine.add_root(&t.root()).unwrap();
+        let tagged = t.root().join("target");
+        t.put("target/CACHEDIR.TAG", CACHE_TAG);
+        let object = t.put("target/debug/main.o", b"a");
+        t.engine.add_root(&tagged).unwrap();
+
+        let r = rescan_root(&t.engine, &tagged).unwrap();
+
+        assert!(r.created >= 1, "{r:?}");
+        assert!(t.engine.is_tracked(&object));
+        assert!(t.engine.ingest_path(&object).unwrap().is_some());
+    }
+
+    #[test]
+    fn files_kept_before_a_folder_became_generated_stay_and_stop_changing() {
+        let t = setup();
+        t.engine.add_root(&t.root()).unwrap();
+        let p = t.put("build/main.o", b"one");
+        t.rescan();
+        t.put("build/CACHEDIR.TAG", CACHE_TAG);
+        fs::write(&p, b"two").unwrap();
+
+        let r = t.rescan();
+
+        assert_eq!((r.created, r.changed, r.marked_missing), (0, 0, 0), "{r:?}");
+        assert!(t.engine.ingest_path(&p).unwrap().is_none());
+        assert!(t.engine.is_tracked(&p));
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
     }
 
     #[test]

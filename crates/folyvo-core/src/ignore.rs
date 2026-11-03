@@ -1,4 +1,9 @@
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
+
+use crate::canonical::resolved_path;
+use crate::dataless::is_dataless;
 
 pub fn is_ignored(path: &Path) -> bool {
     let Some(name) = path.file_name().map(|n| n.to_string_lossy()) else {
@@ -30,6 +35,38 @@ pub fn is_ignored_under(root: &Path, path: &Path) -> bool {
     let in_hidden_or_package =
         parts.iter().any(|part| part.to_string_lossy().starts_with('.') || is_package(Path::new(part)));
     in_hidden_or_package || is_ignored(Path::new(file))
+}
+
+/// The header every cache folder tag starts with: <https://bford.info/cachedir/>.
+const CACHE_TAG_SIGNATURE: &[u8; 43] = b"Signature: 8a477f597d28d172789f06886806bc55";
+
+/// Whether a folder holds output a tool made rather than someone's work. Only a name no one uses
+/// for their own files or a folder that marks itself counts: `target`, `build` and `dist` can hold
+/// real work, and missing a save is worse than keeping too much.
+pub fn is_generated_folder(dir: &Path) -> bool {
+    dir.file_name().is_some_and(|name| name.eq_ignore_ascii_case("node_modules")) || has_cache_tag(dir)
+}
+
+fn has_cache_tag(dir: &Path) -> bool {
+    let tag = dir.join("CACHEDIR.TAG");
+    if is_dataless(&tag) {
+        return false; // reading a placeholder would force an iCloud download
+    }
+    let mut start = [0; CACHE_TAG_SIGNATURE.len()];
+    File::open(&tag).and_then(|mut file| file.read_exact(&mut start)).is_ok() && &start == CACHE_TAG_SIGNATURE
+}
+
+/// Whether a folder below the root is generated. The root itself never counts: choosing a folder
+/// is a clear request to keep it. Keys can be case folded, so folders are checked on the real path.
+pub fn is_in_generated_folder(root_key: &Path, key: &Path, path: &Path) -> bool {
+    let Ok(relative) = key.strip_prefix(root_key) else {
+        return false;
+    };
+    let folders = relative.components().count().saturating_sub(1);
+    let Ok(real) = resolved_path(path) else {
+        return false;
+    };
+    real.parent().is_some_and(|parent| parent.ancestors().take(folders).any(is_generated_folder))
 }
 
 /// Excel for Mac writes an extensionless temp file named with eight hex characters.
@@ -120,6 +157,33 @@ mod tests {
         let root = Path::new("/work");
         assert!(is_ignored_under(root, Path::new("/elsewhere/.DS_Store")));
         assert!(!is_ignored_under(root, Path::new("/elsewhere/.git/x.docx")));
+    }
+
+    #[test]
+    fn a_cache_tag_counts_only_when_it_starts_with_the_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let tag = dir.path().join("CACHEDIR.TAG");
+        assert!(!is_generated_folder(dir.path()));
+        for (bytes, generated) in [
+            (&CACHE_TAG_SIGNATURE[..], true),
+            (b"Signature: 8a477f597d28d172789f06886806bc55\n# by cargo\n", true),
+            (b"Signature: 8a477f597d28d172789f06886806bc5", false),
+            (b"signature: 8a477f597d28d172789f06886806bc55", false),
+            (b"", false),
+        ] {
+            std::fs::write(&tag, bytes).unwrap();
+            assert_eq!(is_generated_folder(dir.path()), generated, "{:?}", String::from_utf8_lossy(bytes));
+        }
+    }
+
+    #[test]
+    fn node_modules_counts_by_name_in_any_case_and_only_as_the_whole_name() {
+        for name in ["node_modules", "Node_Modules", "NODE_MODULES"] {
+            assert!(is_generated_folder(&Path::new("/work").join(name)), "{name}");
+        }
+        for name in ["node_modules_old", "my_node_modules", "target", "build", "dist"] {
+            assert!(!is_generated_folder(&Path::new("/work").join(name)), "{name}");
+        }
     }
 
     #[test]

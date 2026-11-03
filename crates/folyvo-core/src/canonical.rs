@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -27,9 +27,10 @@ pub fn canonical_key(path: &Path) -> Result<String> {
     canonical_key_with(path, CaseRule::for_platform())
 }
 
-pub fn canonical_key_with(path: &Path, rule: CaseRule) -> Result<String> {
-    let resolved = match fs::canonicalize(path) {
-        Ok(p) => p,
+/// The real path behind a key, spelled as it is on disk, so it can still be opened.
+pub(crate) fn resolved_path(path: &Path) -> Result<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(p) => Ok(p),
         Err(_) => {
             // The file may have just been renamed away or deleted: resolve the parent instead.
             let parent = path
@@ -39,9 +40,13 @@ pub fn canonical_key_with(path: &Path, rule: CaseRule) -> Result<String> {
                 .file_name()
                 .ok_or_else(|| CoreError::io(path, std::io::Error::other("path has no file name")))?;
             let parent = fs::canonicalize(parent).map_err(|e| CoreError::io(parent, e))?;
-            parent.join(name)
+            Ok(parent.join(name))
         }
-    };
+    }
+}
+
+pub fn canonical_key_with(path: &Path, rule: CaseRule) -> Result<String> {
+    let resolved = resolved_path(path)?;
     let text = resolved.to_string_lossy();
     let nfc: String = text.nfc().collect();
     Ok(match rule {
