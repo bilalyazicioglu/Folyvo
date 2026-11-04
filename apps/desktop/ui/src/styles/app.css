@@ -257,6 +257,11 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .reading-bar::-webkit-progress-value { background: var(--accent); }
 .empty--reading { padding: 20px 20px 14px; }
 .empty--reading p { margin: 10px 0 0; }
+.reading-actions { display: flex; justify-content: center; gap: 4px; }
+.empty--beside { padding: 12px 20px 10px; border-bottom: 0.5px solid var(--soft-line); }
+.empty--beside h2 { margin: 0; font-size: 13px; }
+.empty--beside .reading-bar { margin: 8px 0 6px; }
+.empty--beside p { margin: 6px 0 0; font-size: 12px; }
 .reading-count { display: flex; justify-content: space-between; gap: 12px; min-height: 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .confirm { margin-top: 8px; padding: 10px 12px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 0.5px var(--soft-line); }
