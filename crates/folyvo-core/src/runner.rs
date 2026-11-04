@@ -37,7 +37,8 @@ impl Runner {
     }
 
     /// As `start`, telling `on_progress` how far the first scan has come. Setting `stop` ends the
-    /// scan early with `CoreError::ReadStopped`, and nothing goes on watching the folder.
+    /// scan early, which the report says; the folder is watched all the same, so no save is lost
+    /// while the rest waits.
     pub fn start_reporting(
         engine: Arc<Engine>,
         clock: Arc<dyn Clock>,
@@ -68,9 +69,6 @@ impl Runner {
         // The watcher is live before the scan starts: a file saved while the scan runs is queued
         // as an event instead of being lost in the gap between the two.
         let report = rescan_root_stoppable(&engine, &folder, on_progress, stop)?;
-        if report.stopped {
-            return Err(CoreError::ReadStopped { new_items: report.new_items });
-        }
 
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();

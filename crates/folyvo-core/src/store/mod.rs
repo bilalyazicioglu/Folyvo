@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{CoreError, Result};
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 const SCHEMA: &str = include_str!("schema.sql");
 
 /// v1 -> v2: the share-ready mark is gone, copies handed to another app are recorded.
@@ -50,8 +50,16 @@ CREATE TABLE version_change_counts (
 );
 ";
 
+/// v3 -> v4: when an unfinished first read began, when it was paused and whether it was stopped, so
+/// all three survive Folyvo closing. Folders already kept have finished theirs.
+const MIGRATE_3_TO_4: &str = "
+ALTER TABLE watched_roots ADD COLUMN reading_since INTEGER;
+ALTER TABLE watched_roots ADD COLUMN read_paused_at INTEGER;
+ALTER TABLE watched_roots ADD COLUMN read_stopped INTEGER NOT NULL DEFAULT 0 CHECK (read_stopped IN (0, 1));
+";
+
 /// Each step takes a database from the version before it to its own.
-const STEPS: &[(i64, &str)] = &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3)];
+const STEPS: &[(i64, &str)] = &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3), (4, MIGRATE_3_TO_4)];
 
 /// Upgrade a database from `from` one step at a time, each step in its own transaction. The write
 /// lock is taken first and the version read again inside it, so a second process that arrives
@@ -93,7 +101,7 @@ impl Store {
                 conn.execute_batch(SCHEMA)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1 | 2 => migrate(&mut conn, version)?,
+            1..=3 => migrate(&mut conn, version)?,
             SCHEMA_VERSION => {}
             other => return Err(CoreError::Corrupt(format!("unsupported database schema version {other}"))),
         }
@@ -262,10 +270,10 @@ mod tests {
     }
 
     #[test]
-    fn a_new_database_is_v3_without_share_ready() {
+    fn a_new_database_is_the_latest_without_share_ready() {
         let s = store();
         let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, SCHEMA_VERSION);
         assert!(has(&s, "table", "version_changes"));
         assert!(has(&s, "table", "version_change_counts"));
         assert!(!has(&s, "table", "share_ready"));
@@ -279,7 +287,7 @@ mod tests {
         v1_vault(&path);
         let s = Store::open(&path).unwrap();
         let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, SCHEMA_VERSION);
         assert!(has(&s, "table", "version_changes"));
         assert_eq!((count(&s, "versions"), count(&s, "objects"), count(&s, "share_events")), (3, 2, 1));
         let (kind, service, target): (String, Option<String>, String) = s
@@ -352,9 +360,25 @@ mod tests {
         }
         let s = Store::open(&path).unwrap();
         let v: i64 = s.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, SCHEMA_VERSION);
         assert!(has(&s, "table", "version_changes") && has(&s, "table", "version_change_counts"));
         assert_eq!(count(&s, "versions"), 1);
+    }
+
+    #[test]
+    fn folders_kept_before_reads_were_remembered_count_as_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folyvo.db");
+        {
+            let c = rusqlite::Connection::open(&path).unwrap();
+            c.execute_batch(include_str!("schema_v2.sql")).unwrap();
+            c.execute_batch(MIGRATE_2_TO_3).unwrap();
+            c.execute_batch("INSERT INTO watched_roots(path, added_at) VALUES ('/w', 1);").unwrap();
+            c.pragma_update(None, "user_version", 3).unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(repo::list_roots(s.conn()).unwrap(), vec!["/w".to_string()]);
+        assert!(repo::unfinished_reads(s.conn()).unwrap().is_empty());
     }
 
     #[test]
