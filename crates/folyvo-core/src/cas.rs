@@ -134,6 +134,10 @@ impl Cas {
             let _ = fs::remove_file(&tmp_path);
             return Ok(Stored { hash, size: bytes_read, newly_stored: false });
         }
+        if let Err(e) = make_private(&tmp_path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
         let shard_dir = final_path.parent().expect("object path has a parent").to_path_buf();
         fs::create_dir_all(&shard_dir).map_err(|e| CoreError::io(&shard_dir, e))?;
         fs::rename(&tmp_path, &final_path).map_err(|e| {
@@ -495,6 +499,18 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         cas.remove_object(&stored.hash).unwrap();
         assert!(!cas.contains(&stored.hash));
+    }
+
+    // Filesystems without clones take this path, so a clone and a copy must end up alike.
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_copy_is_kept_as_a_private_object_too() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, cas) = cas();
+        let src = write(&dir, "a.docx", b"copied");
+        let stored = cas.put_file_with_hook(&src, &mut || {}).unwrap();
+        let mode = fs::metadata(cas.path_of(&stored.hash)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[cfg(unix)]
