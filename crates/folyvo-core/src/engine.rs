@@ -264,6 +264,32 @@ impl Engine {
         Ok(())
     }
 
+    /// Takes back what a stopped first read added, as if it had never run: the person's own files
+    /// are not touched. A file saved again or sent since then has become real history and stays.
+    pub fn forget_new_items(&self, items: &[ItemId]) -> Result<()> {
+        let mut g = self.lock();
+        let inner = &mut *g;
+        let tx = inner.store.conn_mut().transaction()?;
+        let mut forgotten = Vec::new();
+        for item in items {
+            if let Some(found) = repo::forget_new_item(&tx, item)? {
+                forgotten.push((item, found));
+            }
+        }
+        tx.commit()?;
+        let mut tracked = self.tracked.write().unwrap_or_else(|p| p.into_inner());
+        for (item, found) in &forgotten {
+            if let Some(key) = &found.key {
+                tracked.remove(key);
+            }
+            if found.object_unused {
+                inner.cas.remove_object(&found.hash)?;
+            }
+            let _ = fs::remove_dir_all(inner.cas.root().join("exports").join(item.as_str()));
+        }
+        Ok(())
+    }
+
     pub fn roots(&self) -> Result<Vec<PathBuf>> {
         let g = self.lock();
         Ok(repo::list_roots(g.store.conn())?.into_iter().map(PathBuf::from).collect())

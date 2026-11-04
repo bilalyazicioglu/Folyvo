@@ -8,4 +8,8 @@ total: number,
 /**
  * Unknown until enough has been read to tell.
  */
-secondsLeft: number | null, };
+secondsLeft: number | null, 
+/**
+ * Asked to stop, and ending after the file it is on.
+ */
+stopping: boolean, };

@@ -21,7 +21,7 @@ export function FolderList({ folders, onAdd, onRemove, busy, defaultOpen, summar
           <li key={f.path}>
             <div className="path" title={f.path}>
               {folderName(f.path)}
-              {f.reading && <div className="reading">Reading…</div>}
+              {f.reading && <div className="reading">{f.reading.stopping ? "Stopping…" : "Reading…"}</div>}
               {f.problem && (
                 <div className="problem">
                   <strong>{f.problem.title}</strong>
@@ -29,8 +29,8 @@ export function FolderList({ folders, onAdd, onRemove, busy, defaultOpen, summar
                 </div>
               )}
             </div>
-            <button type="button" className="btn btn--link" disabled={busy || f.reading !== null} onClick={() => onRemove(f.path)} aria-label={`Stop watching ${folderName(f.path)}`}>
-              Stop watching
+            <button type="button" className="btn btn--link" disabled={busy || !!f.reading?.stopping} onClick={() => onRemove(f.path)} aria-label={`${f.reading ? "Stop reading" : "Stop watching"} ${folderName(f.path)}`}>
+              {f.reading ? "Stop Reading" : "Stop watching"}
             </button>
           </li>
         ))}

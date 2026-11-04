@@ -287,6 +287,8 @@ pub struct ReadingDto {
     pub total: u32,
     /// Unknown until enough has been read to tell.
     pub seconds_left: Option<u32>,
+    /// Asked to stop, and ending after the file it is on.
+    pub stopping: bool,
 }
 
 /// How a copy left: saved to a folder through Folyvo, or handed to another app.
