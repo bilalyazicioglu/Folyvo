@@ -130,6 +130,15 @@ pub fn rescan_root_stoppable(
     let tracked_keys: std::collections::HashSet<String> =
         tracked.iter().filter_map(|t| canonical_key(&t.path).ok()).collect();
 
+    // A read going on after a pause or a stop does not read again what it already read. Size and
+    // time say a file has not changed, as they do for a build; a save that kept both is the price.
+    let read_so_far = engine.read_so_far(root)?;
+    let already_read: std::collections::HashMap<String, (u64, i64)> = tracked
+        .iter()
+        .filter(|t| t.latest.seq == 1 && read_so_far.contains(&t.item))
+        .filter_map(|t| Some((canonical_key(&t.path).ok()?, (t.latest.size, t.latest.created_at))))
+        .collect();
+
     // Vanished: tracked items whose file is gone. They are the pool for rename matching.
     let mut vanished: Vec<(usize, Known)> = tracked
         .iter()
@@ -193,6 +202,13 @@ pub fn rescan_root_stoppable(
                 continue;
             }
         };
+        if let Some(&(size, saved_at)) = already_read.get(&key) {
+            let same = fs::symlink_metadata(path).is_ok_and(|m| m.len() == size && mtime_ms(&m) == saved_at);
+            if same {
+                report.unchanged += 1;
+                continue;
+            }
+        }
         if tracked_keys.contains(&key) {
             let result = engine.ingest_found(path);
             record(&mut report, path, result);
@@ -695,6 +711,50 @@ mod tests {
         t.engine.forget_read(&t.root()).unwrap();
         assert!(t.engine.is_tracked(&p));
         assert!(!t.engine.is_tracked(&inside));
+    }
+
+    /// A file kept by a read that has not ended, last saved at a time the clock has passed.
+    fn read_a_file(t: &T) -> PathBuf {
+        t.clock.advance(1_000_000);
+        t.engine.begin_read(&t.root()).unwrap();
+        let p = t.put("a.txt", b"one");
+        saved_at(&p, 100);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+        p
+    }
+
+    #[test]
+    fn going_on_with_a_read_passes_over_what_it_already_read() {
+        let t = setup();
+        let p = read_a_file(&t);
+        // The same size and time: only a scan that opens the file can tell the difference.
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 100);
+        let r = t.rescan();
+        assert_eq!(r.unchanged, 1, "{r:?}");
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+    }
+
+    #[test]
+    fn going_on_with_a_read_keeps_a_file_changed_since() {
+        let t = setup();
+        let p = read_a_file(&t);
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 200);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
+    }
+
+    #[test]
+    fn a_finished_read_passes_over_nothing() {
+        let t = setup();
+        let p = read_a_file(&t);
+        t.engine.finish_read(&t.root()).unwrap();
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 100);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
     }
 
     #[test]
