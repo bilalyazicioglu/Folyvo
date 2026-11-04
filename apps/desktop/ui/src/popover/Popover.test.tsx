@@ -133,7 +133,7 @@ test("quit is there before any folder is kept", async () => {
 });
 
 test("quit is there while a folder is being read", async () => {
-  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, stopping: false } }] });
+  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "reading", quiet: false } }] });
   renderWithClient(<Popover />);
   expect(await screen.findByRole("button", { name: "Quit Folyvo" })).toBeInTheDocument();
 });
@@ -182,11 +182,41 @@ test("a row's tooltip tells folders of the same name apart by the file's path", 
   expect(within(row).getByTitle("/Users/a/Project/src/main.c")).toHaveClass("file__sub");
 });
 
-test("stopping a read from the popover asks to remove that folder", async () => {
-  const b = mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, stopping: false } }] });
+test("pausing a read from the popover keeps the folder", async () => {
+  const b = mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "reading", quiet: false } }] });
+  renderWithClient(<Popover />);
+  await userEvent.click(await screen.findByRole("button", { name: "Pause Reading" }));
+  await waitFor(() => expect(b.called("pause_folder")).toHaveLength(1));
+  expect(b.called("remove_folder")).toHaveLength(0);
+});
+
+test("resuming a paused read from the popover goes on with it", async () => {
+  const b = mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "paused", quiet: false } }] });
+  renderWithClient(<Popover />);
+  expect(await screen.findByText("Paused reading Documents")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Resume Reading" }));
+  await waitFor(() => expect(b.called("resume_folder")).toHaveLength(1));
+});
+
+test("stopping a paused read from the popover keeps nothing on screen", async () => {
+  const b = mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "paused", quiet: false } }] });
   renderWithClient(<Popover />);
   await userEvent.click(await screen.findByRole("button", { name: "Stop Reading" }));
-  await waitFor(() => expect(b.called("remove_folder")).toHaveLength(1));
+  await waitFor(() => expect(b.called("stop_reading")).toHaveLength(1));
+  expect(b.called("remove_folder")).toHaveLength(0);
+});
+
+test("a pause that has shown long enough leaves the popover but not the folder's row", async () => {
+  mockBackend({
+    folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "paused", quiet: true } }],
+    recent: [item({ name: "Proposal.docx" })],
+  });
+  renderWithClient(<Popover />);
+  expect((await screen.findAllByText("Proposal.docx")).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("heading", { name: "Reading paused" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Resume Reading" })).not.toBeInTheDocument();
+  expect(screen.getByText("Paused reading Documents")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
 });
 
 test("open history opens that file", async () => {
@@ -409,21 +439,32 @@ describe("reaching every file", () => {
 });
 
 test("while a folder is being read the popover says so instead of waiting for a save", async () => {
-  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120, stopping: false } }], recent: [] });
+  mockBackend({ folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120, state: "reading", quiet: false } }], recent: [] });
   renderWithClient(<Popover />);
   expect(await screen.findByText("Reading Documents…")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Reading your files" })).toBeInTheDocument();
   expect(screen.queryByText("Waiting for the first save")).not.toBeInTheDocument();
 });
 
-test("files read for the first time do not stream past while a folder is being read", async () => {
+test("the files already kept stay reachable beside a read", async () => {
   mockBackend({
-    folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120, stopping: false } }],
-    recent: [item({ name: "liblibc.rlib" })],
+    folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 8986, total: 17233, secondsLeft: 120, state: "reading", quiet: false } }],
+    recent: [item({ name: "Proposal.docx" })],
   });
   renderWithClient(<Popover />);
   expect(await screen.findByRole("heading", { name: "Reading your files" })).toBeInTheDocument();
-  expect(screen.queryByText("liblibc.rlib")).not.toBeInTheDocument();
-  expect(screen.queryByText("Today")).not.toBeInTheDocument();
+  expect(screen.getAllByText("Proposal.docx").length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "All Files…" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Pause Reading" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
+});
+
+test("a read with no kept files beside it has the popover to itself", async () => {
+  mockBackend({
+    folders: [{ path: "/Users/a/Documents", problem: null, reading: { done: 1, total: 9, secondsLeft: null, state: "reading", quiet: false } }],
+    recent: [],
+  });
+  renderWithClient(<Popover />);
+  expect(await screen.findByText(/Your files show up here/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "All Files…" })).not.toBeInTheDocument();
 });

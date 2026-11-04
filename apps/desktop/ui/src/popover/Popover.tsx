@@ -16,6 +16,8 @@ const ROWS = 8;
 
 function keeping(folders: FolderDto[]): string {
   const reading = folders.filter((f) => f.reading);
+  if (reading.length > 0 && reading.every((f) => f.reading?.state === "paused"))
+    return reading.length === 1 ? `Paused reading ${folderName(reading[0].path)}` : `Paused reading ${reading.length} folders`;
   if (reading.length === 1) return `Reading ${folderName(reading[0].path)}…`;
   if (reading.length > 1) return `Reading ${reading.length} folders…`;
   return folders.length === 1
@@ -109,13 +111,17 @@ export function Popover() {
     if (picked) await act.run(() => api.addFolder(picked));
   };
   const removeFolder = (path: string) => void act.run(() => api.removeFolder(path));
+  const pauseFolder = (path: string) => void act.run(() => api.pauseFolder(path));
+  const resumeFolder = (path: string) => void act.run(() => api.resumeFolder(path));
+  const stopReading = (path: string) => void act.run(() => api.stopReading(path));
 
   if (folders.isPending || recent.isPending)
     return <main className="popover" aria-busy="true" aria-label="Folyvo" ref={root} />;
 
   const folderList = folders.data ?? [];
-  // Files read for the first time are not news; listing them as they arrive only looks alarming.
-  const reading = folderList.some((f) => f.reading);
+  // The list leaves out what a read is bringing in, so it holds only what the person already knows.
+  const shown = folderList.filter((f) => f.reading && !f.reading.quiet);
+  const reading = shown.length > 0;
   const items = recent.data ?? [];
   const saves = [...(activity.data?.saves ?? [])].sort((a, b) => a.at - b.at);
   const copies = [...(activity.data?.copies ?? [])].sort((a, b) => a.at - b.at);
@@ -139,13 +145,17 @@ export function Popover() {
         />
       )}
 
+      {reading && items.length > 0 && <ReadingFolders folders={shown} onPause={pauseFolder} onResume={resumeFolder} onStop={stopReading} beside />}
+
       <div className="popover__body">
         {folderList.length === 0 ? (
           <NoFolders onChoose={() => void addFolder()} busy={act.busy} />
-        ) : reading ? (
-          <ReadingFolders folders={folderList} onStop={removeFolder} />
         ) : items.length === 0 ? (
-          <WaitingForSave folder={folderName(folderList[0].path)} />
+          reading ? (
+            <ReadingFolders folders={shown} onPause={pauseFolder} onResume={resumeFolder} onStop={stopReading} />
+          ) : (
+            <WaitingForSave folder={folderName(folderList[0].path)} />
+          )
         ) : (
           <ul className="rows">
             {items.slice(0, ROWS).map((it) => (
@@ -167,7 +177,7 @@ export function Popover() {
 
       <footer className="popover__foot">
         <div className="popover__actions">
-          {folderList.length > 0 && !reading && items.length > 0 && (
+          {folderList.length > 0 && items.length > 0 && (
             <button type="button" className="btn btn--link popover__all" onClick={() => void api.openAllFiles()}>
               All Files…
             </button>
