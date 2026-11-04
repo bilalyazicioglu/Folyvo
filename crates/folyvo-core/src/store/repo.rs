@@ -232,6 +232,44 @@ pub(crate) fn insert_root(c: &Connection, path: &str, now: i64) -> Result<()> {
     Ok(())
 }
 
+/// What taking back a file left to clean up outside the database.
+pub(crate) struct ForgottenItem {
+    pub key: Option<String>,
+    pub hash: ContentHash,
+    pub object_unused: bool,
+}
+
+/// Removes an item only while it is still as a first read left it: one save, never sent anywhere.
+pub(crate) fn forget_new_item(c: &Connection, item: &ItemId) -> Result<Option<ForgottenItem>> {
+    let id = item.as_str();
+    let versions: i64 =
+        c.query_row("SELECT COUNT(*) FROM versions WHERE item_id = ?1", [id], |r| r.get(0))?;
+    let events: i64 =
+        c.query_row("SELECT COUNT(*) FROM share_events WHERE item_id = ?1", [id], |r| r.get(0))?;
+    if versions != 1 || events != 0 {
+        return Ok(None);
+    }
+    let Some(version) = latest_version(c, item)? else { return Ok(None) };
+    let key = c
+        .query_row("SELECT canonical_key FROM locations WHERE item_id = ?1 AND is_current = 1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let vid = version.id.as_str();
+    c.execute("DELETE FROM version_change_counts WHERE version_id = ?1", [vid])?;
+    c.execute("DELETE FROM version_changes WHERE version_id = ?1", [vid])?;
+    c.execute("DELETE FROM versions WHERE id = ?1", [vid])?;
+    c.execute("DELETE FROM locations WHERE item_id = ?1", [id])?;
+    c.execute("DELETE FROM items WHERE id = ?1", [id])?;
+    let hash = version.content_hash;
+    let object_unused = c.execute(
+        "DELETE FROM objects WHERE content_hash = ?1
+         AND NOT EXISTS (SELECT 1 FROM versions WHERE content_hash = ?1)",
+        [hash.as_str()],
+    )? > 0;
+    Ok(Some(ForgottenItem { key, hash, object_unused }))
+}
+
 pub(crate) fn delete_root(c: &Connection, path: &str) -> Result<()> {
     c.execute("DELETE FROM watched_roots WHERE path = ?1", [path])?;
     Ok(())

@@ -17,8 +17,9 @@ function timeLeft(seconds: number): string {
   return minutes === 1 ? "About a minute left" : `About ${minutes} minutes left`;
 }
 
-export function ReadingFolders({ folders }: { folders: FolderDto[] }) {
+export function ReadingFolders({ folders, onStop }: { folders: FolderDto[]; onStop: (path: string) => void }) {
   const reading = folders.flatMap((f) => (f.reading ? [f.reading] : []));
+  const going = folders.filter((f) => f.reading && !f.reading.stopping);
   const done = reading.reduce((sum, r) => sum + r.done, 0);
   const total = reading.reduce((sum, r) => sum + r.total, 0);
   const lefts = reading.map((r) => r.secondsLeft);
@@ -37,6 +38,13 @@ export function ReadingFolders({ folders }: { folders: FolderDto[] }) {
         {left !== null && <span>{timeLeft(left)}</span>}
       </div>
       <p>You can keep working. Your files show up here when Folyvo has finished.</p>
+      {going.length > 0 ? (
+        <button type="button" className="btn btn--link" onClick={() => going.forEach((f) => onStop(f.path))}>
+          Stop Reading
+        </button>
+      ) : (
+        <p>Stopping…</p>
+      )}
     </section>
   );
 }

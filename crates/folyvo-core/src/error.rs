@@ -7,6 +7,9 @@ pub type Result<T> = std::result::Result<T, CoreError>;
 /// Typed, user-facing errors. The UI maps each variant to "what happened, what to do".
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// A first read was asked to stop. These files were new to the vault when it read them.
+    #[error("the read was stopped")]
+    ReadStopped { new_items: Vec<crate::model::ItemId> },
     #[error("could not access {path}: {source}")]
     Io {
         path: PathBuf,

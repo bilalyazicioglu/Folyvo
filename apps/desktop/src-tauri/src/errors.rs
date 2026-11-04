@@ -54,6 +54,7 @@ impl From<IdError> for UserError {
 impl From<CoreError> for UserError {
     fn from(e: CoreError) -> Self {
         match e {
+            CoreError::ReadStopped { .. } => Self::internal(),
             CoreError::BadService(_) => {
                 Self::bad_request("Folyvo didn't recognise that app", "Try sending the copy again.")
             }

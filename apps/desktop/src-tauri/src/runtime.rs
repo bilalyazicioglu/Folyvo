@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -45,6 +45,7 @@ fn seconds_left(elapsed_ms: i64, p: ScanProgress) -> Option<u32> {
 struct Reading {
     started_ms: i64,
     progress: ScanProgress,
+    stop: Arc<AtomicBool>,
 }
 
 impl Reading {
@@ -54,6 +55,7 @@ impl Reading {
             done: p.done as u32,
             total: p.total as u32,
             seconds_left: seconds_left(now_ms - self.started_ms, p),
+            stopping: self.stop.load(Ordering::SeqCst),
         }
     }
 }
@@ -103,7 +105,7 @@ impl AppRuntime {
             missed: AtomicUsize::new(0),
         });
         for root in runtime.engine.roots()? {
-            match runtime.start_runner(&root, &|_| {}) {
+            match runtime.start_runner(&root, &|_| {}, &AtomicBool::new(false)) {
                 Ok(changed) => {
                     runtime.missed.fetch_add(changed, Ordering::SeqCst);
                 }
@@ -146,13 +148,17 @@ impl AppRuntime {
         if self.runners.lock().unwrap().contains_key(&canonical) {
             return Ok(());
         }
+        let stop = Arc::new(AtomicBool::new(false));
         {
             let mut reading = self.reading.lock().unwrap();
             if reading.contains_key(&canonical) {
                 return Ok(());
             }
             let started_ms = self.clock.now_unix_ms();
-            reading.insert(canonical.clone(), Reading { started_ms, progress: ScanProgress::default() });
+            reading.insert(
+                canonical.clone(),
+                Reading { started_ms, progress: ScanProgress::default(), stop: stop.clone() },
+            );
         }
         self.notifier.notify(EngineEventDto::RootsChanged);
         let rt = self.clone();
@@ -168,7 +174,7 @@ impl AppRuntime {
                     rt.notifier.notify(EngineEventDto::RootsChanged);
                 }
             };
-            if let Err(problem) = rt.start_runner(&canonical, &on_progress) {
+            if let Err(problem) = rt.start_runner(&canonical, &on_progress, &stop) {
                 rt.problems.lock().unwrap().insert(canonical.clone(), problem);
             }
             rt.reading.lock().unwrap().remove(&canonical);
@@ -177,15 +183,13 @@ impl AppRuntime {
         Ok(())
     }
 
-    /// A read cannot be stopped halfway, so a folder being read stays until the read ends.
+    /// A folder being read is asked to stop; what the read added goes with it when it ends.
     pub fn remove_folder(&self, folder: &Path) -> Result<(), UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        if self.reading.lock().unwrap().contains_key(&canonical) {
-            return Err(UserError::new(
-                "folder_busy",
-                "Folyvo is still reading that folder",
-                "Try again when it has finished.",
-            ));
+        if let Some(reading) = self.reading.lock().unwrap().get(&canonical) {
+            reading.stop.store(true, Ordering::SeqCst);
+            self.notifier.notify(EngineEventDto::RootsChanged);
+            return Ok(());
         }
         let runner = self.runners.lock().unwrap().remove(&canonical);
         drop(runner); // stops the watcher thread
@@ -212,7 +216,12 @@ impl AppRuntime {
     }
 
     /// Returns how many kept files the first scan found changed.
-    fn start_runner(&self, folder: &Path, on_progress: &dyn Fn(ScanProgress)) -> Result<usize, UserError> {
+    fn start_runner(
+        &self,
+        folder: &Path,
+        on_progress: &dyn Fn(ScanProgress),
+        stop: &AtomicBool,
+    ) -> Result<usize, UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         if self.runners.lock().unwrap().contains_key(&canonical) {
             return Ok(0);
@@ -222,14 +231,24 @@ impl AppRuntime {
                 eprintln!("folyvo: could not save {}: {reason}", path.display());
             }
         });
-        let (runner, report) = Runner::start_reporting(
+        let started = Runner::start_reporting(
             self.engine.clone(),
             self.clock.clone(),
             folder,
             self.quiet,
             on_applied,
             on_progress,
-        )?;
+            stop,
+        );
+        let (runner, report) = match started {
+            Err(CoreError::ReadStopped { new_items }) => {
+                self.engine.forget_new_items(&new_items)?;
+                self.engine.remove_root(folder)?;
+                self.notifier.notify(EngineEventDto::Resync);
+                return Ok(0);
+            }
+            other => other?,
+        };
         // Only the folder itself: one unreadable folder inside it must not stop the rest being kept.
         if report.failed.iter().any(|(path, _)| path == runner.folder()) {
             let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
@@ -428,7 +447,23 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_being_read_says_so_and_cannot_be_removed_yet() {
+    fn stopping_a_read_leaves_the_folder_as_if_it_had_never_been_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        let (rt, _rx) = start(dir.path());
+        let stop = AtomicBool::new(false);
+        let on_progress = |_: ScanProgress| stop.store(true, Ordering::SeqCst);
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(0));
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+        assert!(recent_names(&rt).is_empty());
+        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one");
+    }
+
+    #[test]
+    fn a_folder_being_read_says_so_and_stopping_it_asks_the_read_to_end() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("w");
         fs::create_dir(&folder).unwrap();
@@ -437,11 +472,14 @@ mod tests {
         let canonical = fs::canonicalize(&folder).unwrap();
         rt.runners.lock().unwrap().remove(&canonical);
         let progress = ScanProgress { done: 1, total: 4, done_bytes: 25, total_bytes: 100 };
-        rt.reading.lock().unwrap().insert(canonical, Reading { started_ms: 0, progress });
+        let stop = Arc::new(AtomicBool::new(false));
+        rt.reading.lock().unwrap().insert(canonical, Reading { started_ms: 0, progress, stop: stop.clone() });
         let reading = rt.folders()[0].reading.clone().unwrap();
-        assert_eq!((reading.done, reading.total), (1, 4));
-        assert_eq!(rt.remove_folder(&folder).unwrap_err().code, "folder_busy");
-        assert_eq!(rt.folders().len(), 1);
+        assert_eq!((reading.done, reading.total, reading.stopping), (1, 4, false));
+        assert_eq!(rt.remove_folder(&folder), Ok(()));
+        assert!(stop.load(Ordering::SeqCst));
+        assert_eq!(rt.folders().len(), 1, "the row stays until the read has ended");
+        assert!(rt.folders()[0].reading.clone().unwrap().stopping);
     }
 
     #[test]

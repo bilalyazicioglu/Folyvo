@@ -36,8 +36,18 @@ test("the section summary counts the folders", () => {
   expect(screen.getByText("Watched folders (2)")).toBeInTheDocument();
 });
 
-test("a folder being read says so and cannot be stopped yet", () => {
-  render(<FolderList folders={[{ ...ok, reading: { done: 8986, total: 17233, secondsLeft: 120 } }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+test("a folder being read says so and can be stopped", async () => {
+  const onRemove = vi.fn();
+  const reading = { done: 8986, total: 17233, secondsLeft: 120, stopping: false };
+  render(<FolderList folders={[{ ...ok, reading }]} onRemove={onRemove} busy={false} defaultOpen />);
   expect(screen.getByText("Reading…")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "Stop reading Client work" }));
+  expect(onRemove).toHaveBeenCalledWith(ok.path);
+});
+
+test("a folder that was asked to stop says so and cannot be asked twice", () => {
+  const reading = { done: 8986, total: 17233, secondsLeft: 120, stopping: true };
+  render(<FolderList folders={[{ ...ok, reading }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+  expect(screen.getByText("Stopping…")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Stop reading Client work" })).toBeDisabled();
 });
