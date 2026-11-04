@@ -10,7 +10,6 @@ use crate::error::{CoreError, Result};
 use crate::export::file_hash;
 use crate::ignore::{is_generated_folder, is_ignored, is_in_generated_folder, is_package};
 use crate::ingest::IngestOutcome;
-use crate::model::ItemId;
 use crate::reconcile::{match_candidate, Candidate, Known, Match};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -25,8 +24,6 @@ pub struct RescanReport {
     pub failed: Vec<(PathBuf, String)>,
     /// The scan was asked to stop and ended early. Nothing was marked missing.
     pub stopped: bool,
-    /// Files seen for the first time, so a stopped first read can take them back.
-    pub new_items: Vec<ItemId>,
 }
 
 /// How far a scan has come. Sizes tell how long is left better than counts: one big file can take
@@ -226,10 +223,7 @@ pub fn rescan_root_stoppable(
                 Err(e) => report.failed.push((path.clone(), e.to_string())),
             },
             Ok(Match::NewItem) | Ok(Match::Ambiguous) => match engine.ingest_found(path) {
-                Ok(Some(IngestOutcome::Created(version))) => {
-                    report.created += 1;
-                    report.new_items.push(version.item_id);
-                }
+                Ok(Some(IngestOutcome::Created(_))) => report.created += 1,
                 Ok(Some(IngestOutcome::Unchanged(_))) => report.unchanged += 1,
                 Ok(None) => report.skipped += 1,
                 Err(e) => report.failed.push((path.clone(), e.to_string())),
@@ -281,7 +275,7 @@ mod tests {
 
     impl T {
         fn root(&self) -> PathBuf {
-            self.dir.path().join("work")
+            fs::canonicalize(self.dir.path()).unwrap().join("work")
         }
         fn put(&self, rel: &str, bytes: &[u8]) -> PathBuf {
             let p = self.root().join(rel);
@@ -603,14 +597,13 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_scan_ends_early_and_names_the_files_it_added() {
+    fn a_stopped_scan_ends_early() {
         let t = setup();
         for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
             t.put(name, name.as_bytes());
         }
         let r = stopped_after(&t, 2);
         assert!(r.stopped);
-        assert_eq!(r.new_items.len(), 2, "{r:?}");
         assert_eq!(t.engine.vault_stats().unwrap().items, 2);
     }
 
@@ -625,7 +618,6 @@ mod tests {
         let r = stopped_after(&t, 1);
         assert!(r.stopped);
         assert_eq!(r.marked_missing, 0, "{r:?}");
-        assert!(r.new_items.is_empty(), "these files were already kept: {r:?}");
     }
 
     #[test]
@@ -644,14 +636,15 @@ mod tests {
         let kept = t.put("kept.txt", b"kept");
         t.rescan();
         let before = t.engine.vault_stats().unwrap();
+        t.clock.advance(1_000);
+        t.engine.begin_read(&t.root()).unwrap();
         let same_bytes = t.put("copy-of-kept.txt", b"kept");
         let new = t.put("new.txt", b"new");
-        let r = t.rescan();
-        assert_eq!(r.new_items.len(), 2, "{r:?}");
+        t.rescan();
         let new_hash = crate::model::ContentHash::of_bytes(b"new");
         assert!(t.engine.object_path(&new_hash).exists());
 
-        t.engine.forget_new_items(&r.new_items).unwrap();
+        t.engine.forget_read(&t.root()).unwrap();
 
         assert_eq!(t.engine.vault_stats().unwrap(), before);
         assert!(!t.engine.is_tracked(&new));
@@ -666,13 +659,42 @@ mod tests {
     #[test]
     fn forgetting_spares_a_file_saved_again_since() {
         let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
         let p = t.put("a.txt", b"one");
-        let r = t.rescan();
+        t.rescan();
         fs::write(&p, b"two").unwrap();
         t.rescan();
-        t.engine.forget_new_items(&r.new_items).unwrap();
+        t.engine.forget_read(&t.root()).unwrap();
         assert!(t.engine.is_tracked(&p));
         assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
+    }
+
+    #[test]
+    fn forgetting_a_finished_read_takes_nothing_back() {
+        let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
+        let p = t.put("a.txt", b"one");
+        t.rescan();
+        t.engine.finish_read(&t.root()).unwrap();
+        t.engine.forget_read(&t.root()).unwrap();
+        assert!(t.engine.is_tracked(&p));
+    }
+
+    #[test]
+    fn forgetting_leaves_a_folder_whose_name_only_starts_the_same() {
+        let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
+        let sibling =
+            t.root().with_file_name(format!("{}-2", t.root().file_name().unwrap().to_string_lossy()));
+        fs::create_dir(&sibling).unwrap();
+        let p = sibling.join("a.txt");
+        fs::write(&p, b"one").unwrap();
+        rescan_root(&t.engine, &sibling).unwrap();
+        let inside = t.put("b.txt", b"two");
+        t.rescan();
+        t.engine.forget_read(&t.root()).unwrap();
+        assert!(t.engine.is_tracked(&p));
+        assert!(!t.engine.is_tracked(&inside));
     }
 
     #[test]

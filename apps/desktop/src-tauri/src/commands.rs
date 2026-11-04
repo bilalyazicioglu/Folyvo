@@ -207,6 +207,24 @@ pub async fn remove_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
 }
 
 #[tauri::command]
+pub async fn pause_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
+    let rt = rt.inner().clone();
+    blocking(move || rt.pause_folder(&PathBuf::from(path))).await
+}
+
+#[tauri::command]
+pub async fn stop_reading(rt: Rt<'_>, path: String) -> Result<(), UserError> {
+    let rt = rt.inner().clone();
+    blocking(move || rt.stop_reading(&PathBuf::from(path))).await
+}
+
+#[tauri::command]
+pub async fn resume_folder(rt: Rt<'_>, path: String) -> Result<(), UserError> {
+    let rt = rt.inner().clone();
+    blocking(move || rt.resume_folder(&PathBuf::from(path))).await
+}
+
+#[tauri::command]
 pub fn open_history(app: AppHandle, item: String) -> Result<(), UserError> {
     folyvo_core::model::ItemId::parse(&item).map_err(UserError::from)?;
     crate::tray::open_versions(&app, &item, None).map_err(|_| UserError::internal())

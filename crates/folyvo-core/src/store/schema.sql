@@ -54,7 +54,10 @@ CREATE INDEX versions_by_hash ON versions(content_hash);
 CREATE TABLE watched_roots (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     path     TEXT    NOT NULL UNIQUE,
-    added_at INTEGER NOT NULL
+    added_at INTEGER NOT NULL,
+    reading_since INTEGER,
+    read_paused_at INTEGER,
+    read_stopped INTEGER NOT NULL DEFAULT 0 CHECK (read_stopped IN (0, 1))
 );
 
 CREATE TABLE version_changes (
