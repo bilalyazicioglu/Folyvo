@@ -83,6 +83,8 @@ struct Reading {
     progress: ScanProgress,
     state: ReadingState,
     paused_at: Option<i64>,
+    /// How far this read had come before: the bar never goes back to it.
+    read_before: usize,
     stop: Arc<Stop>,
 }
 
@@ -90,7 +92,10 @@ impl Reading {
     fn dto(&self, now_ms: i64) -> ReadingDto {
         let p = self.progress;
         ReadingDto {
-            done: p.done as u32,
+            done: match p.total {
+                0 => p.done.max(self.read_before),
+                total => p.done.max(self.read_before).min(total),
+            } as u32,
             total: p.total as u32,
             seconds_left: (self.state == ReadingState::Reading)
                 .then(|| seconds_left(now_ms - self.started_ms, p))
@@ -166,7 +171,7 @@ impl AppRuntime {
                 runtime.stay_paused(&root, at).err()
             } else {
                 // Folyvo closed during this read. It goes on behind the menu bar.
-                runtime.read_in_background(root.clone());
+                runtime.read_in_background(root.clone(), 0);
                 None
             };
             if let Some(problem) = problem {
@@ -216,12 +221,13 @@ impl AppRuntime {
         self.engine.begin_read(folder)?;
         self.problems.lock().unwrap().remove(folder);
         self.problems.lock().unwrap().remove(&canonical);
-        self.read_in_background(canonical);
+        self.read_in_background(canonical, 0);
         Ok(())
     }
 
-    fn read_in_background(self: &Arc<Self>, canonical: PathBuf) {
+    fn read_in_background(self: &Arc<Self>, canonical: PathBuf, shown_before: usize) {
         let stop = Arc::new(Stop::default());
+        let read_so_far = self.engine.read_so_far(&canonical).map_or(0, |items| items.len());
         {
             let mut reading = self.reading.lock().unwrap();
             if reading.contains_key(&canonical) {
@@ -235,6 +241,7 @@ impl AppRuntime {
                     progress: ScanProgress::default(),
                     state: ReadingState::Reading,
                     paused_at: None,
+                    read_before: shown_before.max(read_so_far),
                     stop: stop.clone(),
                 },
             );
@@ -280,6 +287,7 @@ impl AppRuntime {
             progress: ScanProgress::default(),
             state: ReadingState::Paused,
             paused_at: Some(paused_at),
+            read_before: self.engine.read_so_far(root).map_or(0, |items| items.len()),
             stop: stop.clone(),
         };
         self.reading.lock().unwrap().insert(root.to_path_buf(), reading);
@@ -327,17 +335,17 @@ impl AppRuntime {
     /// Goes on with a paused read. Files already read are not stored again.
     pub fn resume_folder(self: &Arc<Self>, folder: &Path) -> Result<(), UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        {
+        let shown_before = {
             let mut reading = self.reading.lock().unwrap();
             if !reading.get(&canonical).is_some_and(|r| r.state == ReadingState::Paused) {
                 return Ok(());
             }
-            reading.remove(&canonical);
-        }
+            reading.remove(&canonical).map_or(0, |r| r.progress.done.max(r.read_before))
+        };
         self.engine.resume_read(&canonical)?;
         // The read watches again from its own start, so nothing saved in the gap is missed.
         drop(self.runners.lock().unwrap().remove(&canonical));
-        self.read_in_background(canonical);
+        self.read_in_background(canonical, shown_before);
         Ok(())
     }
 
@@ -912,6 +920,85 @@ mod tests {
         assert!(rt.runners.lock().unwrap().is_empty());
     }
 
+    /// A folder of `files` files, its read paused after `read`, watched by a running Folyvo.
+    fn partly_read(dir: &std::path::Path, files: usize, read: usize) -> (Arc<AppRuntime>, PathBuf) {
+        let folder = dir.join("w");
+        fs::create_dir(&folder).unwrap();
+        for i in 0..files {
+            fs::write(folder.join(format!("{i:04}.txt")), i.to_string()).unwrap();
+        }
+        let (rt, _rx) = start(dir);
+        rt.engine.begin_read(&folder).unwrap();
+        let stop = Stop::default();
+        let on_progress = |p: ScanProgress| {
+            if p.done >= read {
+                stop.now.store(true, Ordering::SeqCst);
+            }
+        };
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Paused));
+        let read = rt.engine.vault_stats().unwrap().items as usize;
+        let canonical = fs::canonicalize(&folder).unwrap();
+        rt.engine.pause_read(&canonical).unwrap();
+        rt.reading.lock().unwrap().insert(
+            canonical,
+            Reading {
+                started_ms: 0,
+                progress: ScanProgress { done: read, total: files, ..ScanProgress::default() },
+                state: ReadingState::Paused,
+                paused_at: Some(0),
+                read_before: 0,
+                stop: Arc::new(Stop::already_stopped()),
+            },
+        );
+        (rt, folder)
+    }
+
+    /// Every count the bar shows until the read ends. None may be below what was read before.
+    fn assert_bar_never_goes_back(rt: &AppRuntime, before: u32) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while let Some(reading) = rt.folders()[0].reading.clone() {
+            assert!(reading.done >= before, "the bar went back to {} from {before}", reading.done);
+            assert!(Instant::now() < deadline, "the read did not end");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn the_bar_goes_on_from_where_a_paused_read_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rt, folder) = partly_read(dir.path(), 300, 100);
+        let before = rt.folders()[0].reading.clone().unwrap().done;
+        assert!(before >= 100);
+        rt.resume_folder(&folder).unwrap();
+        assert_bar_never_goes_back(&rt, before);
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 300);
+    }
+
+    #[test]
+    fn the_bar_goes_on_when_a_stopped_folder_is_added_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rt, folder) = partly_read(dir.path(), 300, 100);
+        let before = rt.engine.vault_stats().unwrap().items as u32;
+        rt.stop_reading(&folder).unwrap();
+        rt.add_folder(&folder).unwrap();
+        assert_bar_never_goes_back(&rt, before);
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 300);
+    }
+
+    #[test]
+    fn a_read_that_lost_files_does_not_show_more_read_than_there_are() {
+        let progress = ScanProgress { done: 1, total: 4, ..ScanProgress::default() };
+        let read = Reading {
+            started_ms: 0,
+            progress,
+            state: ReadingState::Reading,
+            paused_at: None,
+            read_before: 9,
+            stop: Arc::new(Stop::default()),
+        };
+        assert_eq!(read.dto(0).done, 4);
+    }
+
     #[test]
     fn adding_a_paused_folder_again_resumes_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -982,6 +1069,7 @@ mod tests {
             progress,
             state: ReadingState::Reading,
             paused_at: None,
+            read_before: 0,
             stop: stop.clone(),
         };
         rt.reading.lock().unwrap().insert(canonical, read);
@@ -1007,6 +1095,7 @@ mod tests {
             progress: ScanProgress::default(),
             state: ReadingState::Reading,
             paused_at: None,
+            read_before: 0,
             stop: stop.clone(),
         };
         rt.reading.lock().unwrap().insert(canonical.clone(), read);

@@ -292,6 +292,11 @@ impl Engine {
         Ok(repo::unfinished_reads(g.store.conn())?.into_iter().map(PathBuf::from).collect())
     }
 
+    /// The files an unfinished read of `root` has brought in so far.
+    pub fn read_so_far(&self, root: &Path) -> Result<Vec<ItemId>> {
+        repo::items_of_read(self.lock().store.conn(), &root.to_string_lossy())
+    }
+
     fn usable_root(&self, path: &Path) -> Result<PathBuf> {
         let root = fs::canonicalize(path).map_err(|e| CoreError::io(path, e))?;
         if !root.is_dir() {
