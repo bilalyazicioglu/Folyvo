@@ -33,12 +33,12 @@ pub fn summarise(inputs: &CompareInputs) -> ChangeRecord {
     if *before_hash == inputs.after_hash {
         return ChangeRecord { compared_to, outcome: ChangeOutcome::Identical, counts: Vec::new(), reader };
     }
-    if !folyvo_compare::same_kind(before_path, &inputs.after, &inputs.name) {
+    if !folyvo_compare::same_kind(before_path.path(), inputs.after.path(), &inputs.name) {
         return ChangeRecord { compared_to, outcome: ChangeOutcome::Unknown, counts: Vec::new(), reader };
     }
     let changes = folyvo_compare::compare(
-        &reading_of(before_path, &inputs.name),
-        &reading_of(&inputs.after, &inputs.name),
+        &reading_of(before_path.path(), &inputs.name),
+        &reading_of(inputs.after.path(), &inputs.name),
     );
     let (outcome, counts) = match changes.outcome {
         Outcome::Text => (
@@ -179,6 +179,7 @@ fn next(queue: &Shared) -> Option<VersionId> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use folyvo_core::cas::ObjectFile;
     use folyvo_core::engine::{CompareInputs, Engine};
     use folyvo_core::model::{ChangeCount, ChangeOutcome, ChangeUnit, ContentHash, ItemId, VersionId};
     use folyvo_core::ports::{RandomIdGen, SystemClock};
@@ -246,9 +247,9 @@ pub(crate) mod tests {
         CompareInputs {
             item: ItemId::from_suffix("01"),
             version: VersionId::from_suffix("02"),
-            after: after.to_path_buf(),
+            after: ObjectFile::at(after.to_path_buf()),
             after_hash: hash(after),
-            before: before.map(|b| (VersionId::from_suffix("01"), b.to_path_buf(), hash(b))),
+            before: before.map(|b| (VersionId::from_suffix("01"), ObjectFile::at(b.to_path_buf()), hash(b))),
             name: name.into(),
         }
     }

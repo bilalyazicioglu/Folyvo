@@ -33,7 +33,7 @@ impl<'a> Restorer<'a> {
             (target, PathBuf::from(path))
         };
         self.cas.verify(&target.content_hash)?; // missing -> ObjectMissing, bit rot -> Corrupt
-        let object = self.cas.path_of(&target.content_hash);
+        let object = self.cas.open_object(&target.content_hash)?;
 
         // Unsaved work inside the debounce window must not be lost.
         if path.is_file() && !crate::dataless::is_dataless(&path) {
@@ -44,7 +44,7 @@ impl<'a> Restorer<'a> {
             .ok_or_else(|| CoreError::Corrupt(format!("{item} has no versions")))?;
         let needs_version = latest.content_hash != target.content_hash;
         if needs_version || !path.is_file() {
-            write_atomically(&object, &path)?;
+            write_atomically(object.path(), &path)?;
         }
         if !needs_version {
             repo::set_missing(self.store.conn(), item, false)?;
