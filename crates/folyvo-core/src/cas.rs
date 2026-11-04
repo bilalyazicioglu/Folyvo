@@ -19,6 +19,24 @@ pub struct Cas {
     root: PathBuf,
 }
 
+/// A stored file, ready to read. Hold it for as long as its path is in use: not every stored file
+/// will lie in the vault whole, and one that has to be put together lasts only as long as this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectFile {
+    path: PathBuf,
+}
+
+impl ObjectFile {
+    /// A file that is not in the vault, for tests of what reads stored files.
+    pub fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 impl Cas {
     pub fn root(&self) -> &Path {
         &self.root
@@ -33,6 +51,12 @@ impl Cas {
         Ok(Cas { root: root.to_path_buf() })
     }
 
+    /// The one way to read a stored file. A missing object shows when it is read.
+    pub fn open_object(&self, hash: &ContentHash) -> Result<ObjectFile> {
+        Ok(ObjectFile { path: self.path_of(hash) })
+    }
+
+    /// Where a whole object lies. For writing and tests; reads go through `open_object`.
     pub fn path_of(&self, hash: &ContentHash) -> PathBuf {
         let (a, b) = hash.shard();
         self.root.join("objects").join(a).join(b)
@@ -296,6 +320,21 @@ mod tests {
         let p = dir.path().join(name);
         fs::write(&p, bytes).unwrap();
         p
+    }
+
+    #[test]
+    fn an_opened_object_reads_back_what_was_stored() {
+        let (dir, cas) = cas();
+        let stored = cas.put_file(&write(&dir, "a.docx", b"kept bytes")).unwrap();
+        let object = cas.open_object(&stored.hash).unwrap();
+        assert_eq!(fs::read(object.path()).unwrap(), b"kept bytes");
+    }
+
+    #[test]
+    fn a_missing_object_shows_only_when_it_is_read() {
+        let (_dir, cas) = cas();
+        let object = cas.open_object(&ContentHash::of_bytes(b"never stored")).unwrap();
+        assert!(!object.path().exists());
     }
 
     #[test]

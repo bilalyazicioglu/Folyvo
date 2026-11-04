@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use tokio::sync::broadcast;
 
 use crate::canonical::canonical_key;
-use crate::cas::Cas;
+use crate::cas::{Cas, ObjectFile};
 use crate::error::{CoreError, Result};
 use crate::events;
 use crate::export::{ExportResult, Exporter};
@@ -58,14 +58,14 @@ pub enum EngineEvent {
     },
 }
 
-/// What comparing one save with the save before it needs. Paths point into the vault.
+/// What comparing one save with the save before it needs. Keep it while the files are being read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompareInputs {
     pub item: ItemId,
     pub version: VersionId,
-    pub after: PathBuf,
+    pub after: ObjectFile,
     pub after_hash: ContentHash,
-    pub before: Option<(VersionId, PathBuf, ContentHash)>,
+    pub before: Option<(VersionId, ObjectFile, ContentHash)>,
     /// The file's name, which says how plain text should be read.
     pub name: String,
 }
@@ -464,9 +464,10 @@ impl Engine {
         let v = repo::version(c, version)?.ok_or_else(|| CoreError::VersionMissing(version.clone()))?;
         let name = repo::display_name(c, &v.item_id)?.unwrap_or_default();
         let before = repo::version_before(c, &v.item_id, v.seq)?
-            .map(|b| (b.id, g.cas.path_of(&b.content_hash), b.content_hash));
+            .map(|b| Ok::<_, CoreError>((b.id, g.cas.open_object(&b.content_hash)?, b.content_hash)))
+            .transpose()?;
         Ok(CompareInputs {
-            after: g.cas.path_of(&v.content_hash),
+            after: g.cas.open_object(&v.content_hash)?,
             after_hash: v.content_hash,
             item: v.item_id,
             version: v.id,
@@ -1100,11 +1101,11 @@ mod tests {
         let v3 = t.save(&p, b"three");
         let first = t.engine.compare_inputs(&v1.id).unwrap();
         assert!(first.before.is_none());
-        assert_eq!(fs::read(&first.after).unwrap(), b"one");
+        assert_eq!(fs::read(first.after.path()).unwrap(), b"one");
         let third = t.engine.compare_inputs(&v3.id).unwrap();
         let (before_id, before_path, before_hash) = third.before.unwrap();
         assert_eq!((before_id, before_hash), (v2.id.clone(), v2.content_hash.clone()));
-        assert_eq!(fs::read(before_path).unwrap(), b"two");
+        assert_eq!(fs::read(before_path.path()).unwrap(), b"two");
         assert_eq!(
             (third.item, third.version, third.after_hash),
             (v3.item_id.clone(), v3.id.clone(), v3.content_hash)

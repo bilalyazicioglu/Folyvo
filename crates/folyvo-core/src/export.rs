@@ -76,8 +76,8 @@ pub(crate) fn resolve(
 }
 
 pub(crate) fn materialize(cas: &Cas, item: &ItemId, hash: &ContentHash, name: &str) -> Result<PathBuf> {
-    let source = cas.path_of(hash);
-    if !source.is_file() {
+    let source = cas.open_object(hash)?;
+    if !source.path().is_file() {
         return Err(CoreError::ObjectMissing(hash.clone()));
     }
     let base = cas.root().join("exports").join(item.as_str()).join(hash.as_str());
@@ -93,7 +93,7 @@ pub(crate) fn materialize(cas: &Cas, item: &ItemId, hash: &ContentHash, name: &s
         cas.verify(hash)?; // never materialise bit-rotted bytes
         fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
         let tmp = dir.join(format!(".part-{}", uuid::Uuid::new_v4().simple()));
-        reflink_copy::reflink_or_copy(&source, &tmp).map_err(|e| CoreError::io(&tmp, e))?;
+        reflink_copy::reflink_or_copy(source.path(), &tmp).map_err(|e| CoreError::io(&tmp, e))?;
         make_read_only(&tmp)?;
         fs::rename(&tmp, &path).map_err(|e| {
             let _ = fs::remove_file(&tmp);

@@ -193,6 +193,7 @@ pub(crate) mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn two_pdfs_differ_by_a_page() {
+        use folyvo_core::cas::ObjectFile;
         use folyvo_core::engine::CompareInputs;
         use folyvo_core::model::{ChangeCount, ChangeOutcome, ChangeUnit, ContentHash, ItemId, VersionId};
         let d = tempfile::tempdir().unwrap();
@@ -203,8 +204,8 @@ pub(crate) mod tests {
             item: ItemId::from_suffix("01"),
             version: VersionId::from_suffix("02"),
             after_hash: hash(&b),
-            after: b,
-            before: Some((VersionId::from_suffix("01"), a.clone(), hash(&a))),
+            after: ObjectFile::at(b),
+            before: Some((VersionId::from_suffix("01"), ObjectFile::at(a.clone()), hash(&a))),
             name: "Offer.pdf".into(),
         });
         assert_eq!(r.outcome, ChangeOutcome::Text);

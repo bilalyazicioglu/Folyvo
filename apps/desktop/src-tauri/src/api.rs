@@ -131,15 +131,17 @@ impl AppApi {
         if inputs.item != item {
             return Err(folyvo_core::CoreError::VersionMissing(version).into());
         }
-        let after = crate::changes::reading_of(&inputs.after, &inputs.name);
+        let after = crate::changes::reading_of(inputs.after.path(), &inputs.name);
         let changes = match &inputs.before {
             None => folyvo_compare::compare(&after, &after),
             Some((_, _, hash)) if *hash == inputs.after_hash => return Ok(MarkedPageDto::Identical),
-            Some((_, path, _)) if !folyvo_compare::same_kind(path, &inputs.after, &inputs.name) => {
+            Some((_, before, _))
+                if !folyvo_compare::same_kind(before.path(), inputs.after.path(), &inputs.name) =>
+            {
                 return Ok(MarkedPageDto::Unreadable)
             }
-            Some((_, path, _)) => {
-                folyvo_compare::compare(&crate::changes::reading_of(path, &inputs.name), &after)
+            Some((_, before, _)) => {
+                folyvo_compare::compare(&crate::changes::reading_of(before.path(), &inputs.name), &after)
             }
         };
         Ok(changes.marked.into())
