@@ -118,6 +118,8 @@ pub struct AppRuntime {
     notifier: Arc<dyn Notifier>,
     changes: ChangeWorker,
     missed: AtomicUsize,
+    /// Kept folders looked over at launch, behind the menu bar, with how to stop each.
+    checking: Mutex<HashMap<PathBuf, Arc<Stop>>>,
 }
 
 impl AppRuntime {
@@ -150,24 +152,21 @@ impl AppRuntime {
             reading: Mutex::new(HashMap::new()),
             notifier,
             missed: AtomicUsize::new(0),
+            checking: Mutex::new(HashMap::new()),
         });
         if let Err(problem) = runtime.forget_pauses_that_ran_out() {
             eprintln!("folyvo: could not take back a paused read: {}", problem.title);
         }
         let unfinished = runtime.engine.unfinished_reads()?;
         let paused = runtime.engine.paused_reads()?;
+        let mut kept = Vec::new();
         for root in runtime.engine.roots()? {
+            if !unfinished.contains(&root) {
+                kept.push(root);
+                continue;
+            }
             let paused_at = paused.iter().find(|(path, _)| *path == root).map(|(_, at)| *at);
-            let problem = if !unfinished.contains(&root) {
-                match runtime.start_runner(&root, &|_| {}, &Stop::default()) {
-                    Ok(Started::Watching(changed)) => {
-                        runtime.missed.fetch_add(changed, Ordering::SeqCst);
-                        None
-                    }
-                    Ok(_) => None,
-                    Err(problem) => Some(problem),
-                }
-            } else if let Some(at) = paused_at {
+            let problem = if let Some(at) = paused_at {
                 runtime.stay_paused(&root, at).err()
             } else {
                 // Folyvo closed during this read. It goes on behind the menu bar.
@@ -178,9 +177,54 @@ impl AppRuntime {
                 runtime.problems.lock().unwrap().insert(root, problem);
             }
         }
+        runtime.check_in_background(kept);
         let weak = Arc::downgrade(&runtime);
         thread::spawn(move || look_after_paused_reads(weak));
         Ok(runtime)
+    }
+
+    /// Looks over folders read before, for what changed while Folyvo was closed. With many files
+    /// this takes seconds, so it goes on behind the menu bar, one folder after another. Each folder
+    /// is watched from the moment its check starts, so a save made meanwhile is not lost.
+    fn check_in_background(self: &Arc<Self>, roots: Vec<PathBuf>) {
+        if roots.is_empty() {
+            return;
+        }
+        let stops: Vec<_> = {
+            let mut checking = self.checking.lock().unwrap();
+            roots
+                .into_iter()
+                .map(|root| {
+                    let stop = Arc::new(Stop::default());
+                    checking.insert(root.clone(), stop.clone());
+                    (root, stop)
+                })
+                .collect()
+        };
+        let rt = self.clone();
+        thread::spawn(move || {
+            for (root, stop) in stops {
+                match rt.start_runner(&root, &|_| {}, &stop) {
+                    Ok(Started::Watching(changed)) => {
+                        rt.missed.fetch_add(changed, Ordering::SeqCst);
+                    }
+                    Ok(_) => {}
+                    Err(problem) => {
+                        rt.problems.lock().unwrap().insert(root.clone(), problem);
+                    }
+                }
+                let removed = {
+                    let mut checking = rt.checking.lock().unwrap();
+                    checking.remove(&root);
+                    stop.remove.load(Ordering::SeqCst)
+                };
+                // Taken out of the list while it was looked over.
+                if removed && rt.remove_folder(&root).is_err() {
+                    eprintln!("folyvo: could not remove {}", root.display());
+                }
+                rt.notifier.notify(EngineEventDto::RootsChanged);
+            }
+        });
     }
 
     pub fn api(&self) -> AppApi {
@@ -215,7 +259,9 @@ impl AppRuntime {
             Some(_) => return Ok(()),
             None => {}
         }
-        if self.runners.lock().unwrap().contains_key(&canonical) {
+        if self.runners.lock().unwrap().contains_key(&canonical)
+            || self.checking.lock().unwrap().contains_key(&canonical)
+        {
             return Ok(());
         }
         self.engine.begin_read(folder)?;
@@ -363,6 +409,12 @@ impl AppRuntime {
     /// finish gives back what it added. Anything else keeps its history.
     pub fn remove_folder(&self, folder: &Path) -> Result<(), UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        if let Some(stop) = self.checking.lock().unwrap().get(&canonical) {
+            // Goes when its check ends, which this makes soon.
+            stop.remove.store(true, Ordering::SeqCst);
+            stop.now.store(true, Ordering::SeqCst);
+            return Ok(());
+        }
         {
             let mut reading = self.reading.lock().unwrap();
             match reading.get_mut(&canonical) {
@@ -573,6 +625,7 @@ mod tests {
         }
         fs::remove_dir_all(&gone).unwrap();
         let (rt, _rx) = start(dir.path());
+        wait_until("the check", || checked(&rt));
         let folders = rt.folders();
         assert_eq!(folders.len(), 2);
         let broken: Vec<_> = folders.iter().filter(|f| f.problem.is_some()).collect();
@@ -613,12 +666,74 @@ mod tests {
         fs::write(folder.join("new.txt"), b"nothing was missed of a new file").unwrap();
         {
             let (rt, _rx) = start(dir.path());
+            wait_until("the check", || checked(&rt));
             assert_eq!(rt.missed_while_closed(), 1);
             rt.dismiss_missed();
             assert_eq!(rt.missed_while_closed(), 0);
         }
         let (rt, _rx) = start(dir.path());
+        wait_until("the check", || checked(&rt));
         assert_eq!(rt.missed_while_closed(), 0, "nothing changed since the last launch");
+    }
+
+    /// A kept folder big enough that checking it at launch takes a while.
+    fn big_kept_folder(dir: &std::path::Path) -> PathBuf {
+        let folder = dir.join("big");
+        fs::create_dir(&folder).unwrap();
+        for i in 0..300 {
+            fs::write(folder.join(format!("f{i}.txt")), format!("file {i}")).unwrap();
+        }
+        let (rt, _rx) = start(dir);
+        add_and_read(&rt, &folder);
+        folder
+    }
+
+    fn checked(rt: &AppRuntime) -> bool {
+        rt.checking.lock().unwrap().is_empty()
+    }
+
+    #[test]
+    fn launching_does_not_wait_for_the_kept_folders_to_be_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = big_kept_folder(dir.path());
+        std::thread::sleep(Duration::from_millis(1100));
+        fs::write(folder.join("f0.txt"), b"changed while Folyvo was closed").unwrap();
+        let (rt, _rx) = start(dir.path());
+        assert_eq!(rt.missed_while_closed(), 0, "the check is still going behind the menu bar");
+        wait_until("the check to find the change", || rt.missed_while_closed() == 1);
+    }
+
+    #[test]
+    fn the_ui_hears_when_the_check_at_launch_is_done() {
+        let dir = tempfile::tempdir().unwrap();
+        big_kept_folder(dir.path());
+        let (rt, rx) = start(dir.path());
+        wait_until("the check", || checked(&rt));
+        let heard: Vec<_> = rx.try_iter().collect();
+        assert!(heard.iter().any(|e| matches!(e, EngineEventDto::RootsChanged)), "{heard:?}");
+    }
+
+    #[test]
+    fn a_folder_removed_while_it_is_checked_is_gone_once_the_check_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = big_kept_folder(dir.path());
+        let (rt, _rx) = start(dir.path());
+        rt.remove_folder(&folder).unwrap();
+        wait_until("the check", || checked(&rt));
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty(), "nothing goes on watching it");
+    }
+
+    #[test]
+    fn adding_a_folder_while_it_is_checked_does_not_read_it_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = big_kept_folder(dir.path());
+        let (rt, _rx) = start(dir.path());
+        rt.add_folder(&folder).unwrap();
+        assert!(rt.folders().iter().all(|f| f.reading.is_none()));
+        wait_until("the check", || checked(&rt));
+        assert_eq!(rt.runners.lock().unwrap().len(), 1);
+        assert!(rt.engine.unfinished_reads().unwrap().is_empty());
     }
 
     #[test]
