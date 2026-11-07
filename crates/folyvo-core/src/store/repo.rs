@@ -7,6 +7,7 @@ use crate::model::{
     Version, VersionId, VersionOrigin,
 };
 use std::collections::HashMap;
+use std::path::MAIN_SEPARATOR_STR;
 
 const VERSION_COLS: &str = "id, item_id, seq, content_hash, size, created_at, origin, restored_from, note";
 
@@ -335,9 +336,9 @@ pub(crate) fn items_of_read(c: &Connection, root: &str) -> Result<Vec<ItemId>> {
         "SELECT i.id FROM watched_roots r
          JOIN items i ON i.created_at >= r.reading_since
          JOIN locations l ON l.item_id = i.id AND l.is_current = 1
-         WHERE r.path = ?1 AND substr(l.path, 1, length(r.path) + 1) = r.path || '/'",
+         WHERE r.path = ?1 AND substr(l.path, 1, length(r.path) + 1) = r.path || ?2",
     )?;
-    let rows = stmt.query_map([root], |r| {
+    let rows = stmt.query_map([root, MAIN_SEPARATOR_STR], |r| {
         let id: String = r.get(0)?;
         ItemId::parse(&id).map_err(|e| conv(0, e))
     })?;
@@ -409,12 +410,12 @@ pub(crate) fn recent_items(c: &Connection, limit: u32) -> Result<Vec<ItemId>> {
              SELECT 1 FROM watched_roots r
              JOIN items i ON i.id = v.item_id AND i.created_at >= r.reading_since
              JOIN locations l ON l.item_id = i.id AND l.is_current = 1
-             WHERE substr(l.path, 1, length(r.path) + 1) = r.path || '/'
+             WHERE substr(l.path, 1, length(r.path) + 1) = r.path || ?2
                AND (SELECT COUNT(*) FROM versions o WHERE o.item_id = v.item_id) = 1
          )
          GROUP BY v.item_id ORDER BY MAX(v.created_at) DESC, MAX(v.seq) DESC, v.item_id ASC LIMIT ?1",
     )?;
-    let rows = stmt.query_map([limit], |r| {
+    let rows = stmt.query_map(params![limit, MAIN_SEPARATOR_STR], |r| {
         let id: String = r.get(0)?;
         ItemId::parse(&id).map_err(|e| conv(0, e))
     })?;
