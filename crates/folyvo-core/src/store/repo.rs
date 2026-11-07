@@ -357,14 +357,59 @@ pub(crate) fn list_roots(c: &Connection) -> Result<Vec<String>> {
 }
 
 pub(crate) fn all_current(c: &Connection) -> Result<Vec<(ItemId, String, String)>> {
+    Ok(all_current_seen(c)?.into_iter().map(|l| (l.item, l.key, l.path)).collect())
+}
+
+/// Where an item is now, and how its file looked when last read.
+pub(crate) struct CurrentLocation {
+    pub item: ItemId,
+    pub key: String,
+    pub path: String,
+    pub seen: Option<Seen>,
+}
+
+/// As `all_current`, with the size and time each file had when last read, where known.
+pub(crate) fn all_current_seen(c: &Connection) -> Result<Vec<CurrentLocation>> {
     let mut stmt = c.prepare(
-        "SELECT item_id, canonical_key, path FROM locations WHERE is_current = 1 ORDER BY item_id",
+        "SELECT item_id, canonical_key, path, seen_size, seen_mtime FROM locations
+         WHERE is_current = 1 ORDER BY item_id",
     )?;
     let rows = stmt.query_map([], |r| {
         let id: String = r.get(0)?;
-        Ok((ItemId::parse(&id).map_err(|e| conv(0, e))?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        let seen = match (r.get::<_, Option<i64>>(3)?, r.get::<_, Option<i64>>(4)?) {
+            (Some(size), Some(mtime_ns)) => Some(Seen { size: size as u64, mtime_ns }),
+            _ => None,
+        };
+        Ok(CurrentLocation {
+            item: ItemId::parse(&id).map_err(|e| conv(0, e))?,
+            key: r.get(1)?,
+            path: r.get(2)?,
+            seen,
+        })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// How a file looked when it was last read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Seen {
+    pub size: u64,
+    pub mtime_ns: i64,
+}
+
+impl Seen {
+    pub(crate) fn of(meta: &std::fs::Metadata) -> Option<Seen> {
+        let since = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+        Some(Seen { size: meta.len(), mtime_ns: i64::try_from(since.as_nanos()).ok()? })
+    }
+}
+
+pub(crate) fn set_seen(c: &Connection, item: &ItemId, seen: Option<Seen>) -> Result<()> {
+    c.execute(
+        "UPDATE locations SET seen_size = ?2, seen_mtime = ?3 WHERE item_id = ?1 AND is_current = 1",
+        params![item.as_str(), seen.map(|s| s.size as i64), seen.map(|s| s.mtime_ns)],
+    )?;
+    Ok(())
 }
 
 pub(crate) fn current_key(c: &Connection, item: &ItemId) -> Result<Option<String>> {

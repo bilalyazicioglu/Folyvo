@@ -137,6 +137,7 @@ pub(crate) struct Tracked {
     pub path: PathBuf,
     pub latest: Version,
     pub missing: bool,
+    pub seen: Option<repo::Seen>,
 }
 
 struct Inner {
@@ -664,14 +665,14 @@ impl Engine {
         let g = self.lock();
         let c = g.store.conn();
         let mut out = Vec::new();
-        for (item, key, path) in repo::all_current(c)? {
+        for repo::CurrentLocation { item, key, path, seen } in repo::all_current_seen(c)? {
             if !Path::new(&key).starts_with(&root_key) {
                 continue;
             }
             let latest = repo::latest_version(c, &item)?
                 .ok_or_else(|| CoreError::Corrupt(format!("{item} has no versions")))?;
             let missing = repo::item_flags(c, &item)?.map(|(_, m)| m).unwrap_or(false);
-            out.push(Tracked { item, path: PathBuf::from(path), latest, missing });
+            out.push(Tracked { item, path: PathBuf::from(path), latest, missing, seen });
         }
         Ok(out)
     }
