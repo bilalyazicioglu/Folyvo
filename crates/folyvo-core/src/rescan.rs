@@ -11,6 +11,7 @@ use crate::export::file_hash;
 use crate::ignore::{is_generated_folder, is_ignored, is_in_generated_folder, is_package};
 use crate::ingest::IngestOutcome;
 use crate::reconcile::{match_candidate, Candidate, Known, Match};
+use crate::store::repo::Seen;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RescanReport {
@@ -130,6 +131,15 @@ pub fn rescan_root_stoppable(
     let tracked_keys: std::collections::HashSet<String> =
         tracked.iter().filter_map(|t| canonical_key(&t.path).ok()).collect();
 
+    // A file with the size and time it had when last read has not been saved since: reading every
+    // kept file at each launch would cost the disk as much as the files weigh. A missing one is
+    // read, so it is kept again.
+    let seen: std::collections::HashMap<String, Seen> = tracked
+        .iter()
+        .filter(|t| !t.missing)
+        .filter_map(|t| Some((canonical_key(&t.path).ok()?, t.seen?)))
+        .collect();
+
     // A read going on after a pause or a stop does not read again what it already read. Size and
     // time say a file has not changed, as they do for a build; a save that kept both is the price.
     let read_so_far = engine.read_so_far(root)?;
@@ -202,6 +212,12 @@ pub fn rescan_root_stoppable(
                 continue;
             }
         };
+        if let Some(&last) = seen.get(&key) {
+            if fs::symlink_metadata(path).ok().and_then(|m| Seen::of(&m)) == Some(last) {
+                report.unchanged += 1;
+                continue;
+            }
+        }
         if let Some(&(size, saved_at)) = already_read.get(&key) {
             let same = fs::symlink_metadata(path).is_ok_and(|m| m.len() == size && mtime_ms(&m) == saved_at);
             if same {
@@ -319,6 +335,62 @@ mod tests {
         let r = t.rescan();
         assert_eq!(r.created, 2, "{r:?}");
         assert_eq!(t.engine.vault_stats().unwrap().items, 2);
+    }
+
+    /// Writes `bytes` of the same length and puts the file's time back, as a few tools do.
+    fn keep_size_and_time(p: &Path, bytes: &[u8]) {
+        let before = fs::metadata(p).unwrap().modified().unwrap();
+        fs::write(p, bytes).unwrap();
+        fs::File::options().write(true).open(p).unwrap().set_modified(before).unwrap();
+    }
+
+    #[test]
+    fn a_file_with_the_size_and_time_it_had_when_last_seen_is_not_read_again() {
+        let t = setup();
+        let p = t.put("a.docx", b"one");
+        t.rescan();
+        keep_size_and_time(&p, b"two"); // the price: a save that keeps both goes unseen
+        let r = t.rescan();
+        assert_eq!((r.changed, r.unchanged), (0, 1), "{r:?}");
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+    }
+
+    #[test]
+    fn a_save_the_watcher_kept_is_not_read_again_at_the_next_scan() {
+        let t = setup();
+        let p = t.put("a.docx", b"one");
+        t.rescan();
+        fs::write(&p, b"four").unwrap();
+        t.engine.ingest_path(&p).unwrap();
+        keep_size_and_time(&p, b"five");
+        let r = t.rescan();
+        assert_eq!((r.changed, r.unchanged), (0, 1), "{r:?}");
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
+    }
+
+    #[test]
+    fn a_file_whose_time_moved_is_read_again() {
+        let t = setup();
+        let p = t.put("a.docx", b"one");
+        t.rescan();
+        let later = fs::metadata(&p).unwrap().modified().unwrap() + std::time::Duration::from_secs(5);
+        fs::write(&p, b"two").unwrap();
+        fs::File::options().write(true).open(&p).unwrap().set_modified(later).unwrap();
+        assert_eq!(t.rescan().changed, 1);
+    }
+
+    #[test]
+    fn a_missing_file_back_as_it_was_is_kept_again() {
+        let t = setup();
+        let p = t.put("a.docx", b"one");
+        t.rescan();
+        let away = t.dir.path().join("away.docx");
+        fs::rename(&p, &away).unwrap();
+        t.rescan();
+        assert!(!t.engine.is_tracked(&p));
+        fs::rename(&away, &p).unwrap(); // the same size and time
+        t.rescan();
+        assert!(t.engine.is_tracked(&p));
     }
 
     #[test]
@@ -742,17 +814,6 @@ mod tests {
         let p = read_a_file(&t);
         fs::write(&p, b"two").unwrap();
         saved_at(&p, 200);
-        t.rescan();
-        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
-    }
-
-    #[test]
-    fn a_finished_read_passes_over_nothing() {
-        let t = setup();
-        let p = read_a_file(&t);
-        t.engine.finish_read(&t.root()).unwrap();
-        fs::write(&p, b"two").unwrap();
-        saved_at(&p, 100);
         t.rescan();
         assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
     }

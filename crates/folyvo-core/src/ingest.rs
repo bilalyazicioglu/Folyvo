@@ -43,6 +43,9 @@ impl<'a> Ingestor<'a> {
     /// scan finds. A version is never dated after now or before the one it follows.
     pub fn ingest_saved_at(&mut self, path: &Path, saved_at: Option<i64>) -> Result<IngestOutcome> {
         let key = canonical_key(path)?;
+        // Taken before reading: if the file changes meanwhile, its time no longer matches and the
+        // next scan reads it again.
+        let seen = std::fs::metadata(path).ok().and_then(|m| repo::Seen::of(&m));
         let stored = self.store_object(path)?;
         let now = self.clock.now_unix_ms();
 
@@ -64,6 +67,7 @@ impl<'a> Ingestor<'a> {
         if let Some(prev) = &previous {
             if prev.content_hash == stored.hash {
                 repo::set_missing(&tx, &item_id, false)?;
+                repo::set_seen(&tx, &item_id, seen)?;
                 tx.commit()?;
                 return Ok(IngestOutcome::Unchanged(prev.clone()));
             }
@@ -83,6 +87,7 @@ impl<'a> Ingestor<'a> {
         };
         repo::insert_version(&tx, &version)?;
         repo::set_missing(&tx, &item_id, false)?;
+        repo::set_seen(&tx, &item_id, seen)?;
         tx.commit()?;
         Ok(IngestOutcome::Created(version))
     }

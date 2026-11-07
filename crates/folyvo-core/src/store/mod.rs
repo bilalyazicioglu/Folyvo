@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{CoreError, Result};
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 const SCHEMA: &str = include_str!("schema.sql");
 
 /// v1 -> v2: the share-ready mark is gone, copies handed to another app are recorded.
@@ -58,8 +58,16 @@ ALTER TABLE watched_roots ADD COLUMN read_paused_at INTEGER;
 ALTER TABLE watched_roots ADD COLUMN read_stopped INTEGER NOT NULL DEFAULT 0 CHECK (read_stopped IN (0, 1));
 ";
 
+/// v4 -> v5: the size and time a file had when last read, in nanoseconds, so a scan can pass over
+/// one that kept both instead of reading it again. Unknown until each file is next read.
+const MIGRATE_4_TO_5: &str = "
+ALTER TABLE locations ADD COLUMN seen_size INTEGER;
+ALTER TABLE locations ADD COLUMN seen_mtime INTEGER;
+";
+
 /// Each step takes a database from the version before it to its own.
-const STEPS: &[(i64, &str)] = &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3), (4, MIGRATE_3_TO_4)];
+const STEPS: &[(i64, &str)] =
+    &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3), (4, MIGRATE_3_TO_4), (5, MIGRATE_4_TO_5)];
 
 /// Upgrade a database from `from` one step at a time, each step in its own transaction. The write
 /// lock is taken first and the version read again inside it, so a second process that arrives
@@ -101,7 +109,7 @@ impl Store {
                 conn.execute_batch(SCHEMA)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1..=3 => migrate(&mut conn, version)?,
+            1..=4 => migrate(&mut conn, version)?,
             SCHEMA_VERSION => {}
             other => return Err(CoreError::Corrupt(format!("unsupported database schema version {other}"))),
         }

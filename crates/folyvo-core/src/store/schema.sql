@@ -11,7 +11,9 @@ CREATE TABLE locations (
     path          TEXT    NOT NULL,
     canonical_key TEXT    NOT NULL,
     observed_at   INTEGER NOT NULL,
-    is_current    INTEGER NOT NULL CHECK (is_current IN (0, 1))
+    is_current    INTEGER NOT NULL CHECK (is_current IN (0, 1)),
+    seen_size     INTEGER,
+    seen_mtime    INTEGER
 );
 CREATE UNIQUE INDEX one_current_location_per_item ON locations(item_id) WHERE is_current = 1;
 CREATE UNIQUE INDEX one_current_item_per_path ON locations(canonical_key) WHERE is_current = 1;
