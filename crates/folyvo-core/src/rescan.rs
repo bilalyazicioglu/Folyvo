@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 use crate::canonical::canonical_key;
@@ -21,6 +22,8 @@ pub struct RescanReport {
     pub skipped: usize,
     pub dataless: Vec<PathBuf>,
     pub failed: Vec<(PathBuf, String)>,
+    /// The scan was asked to stop and ended early. Nothing was marked missing.
+    pub stopped: bool,
 }
 
 /// How far a scan has come. Sizes tell how long is left better than counts: one big file can take
@@ -33,7 +36,10 @@ pub struct ScanProgress {
     pub total_bytes: u64,
 }
 
-fn walk(dir: &Path, files: &mut Vec<PathBuf>, failed: &mut Vec<(PathBuf, String)>) {
+fn walk(dir: &Path, files: &mut Vec<PathBuf>, failed: &mut Vec<(PathBuf, String)>, stop: &AtomicBool) {
+    if stop.load(Ordering::SeqCst) {
+        return;
+    }
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(e) => {
@@ -54,7 +60,7 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>, failed: &mut Vec<(PathBuf, String)
         }
         if kind.is_dir() {
             if !is_package(&path) && !is_generated_folder(&path) {
-                walk(&path, files, failed);
+                walk(&path, files, failed, stop);
             }
         } else if kind.is_file() {
             files.push(path);
@@ -79,12 +85,26 @@ pub fn rescan_root_reporting(
     root: &Path,
     on_progress: &dyn Fn(ScanProgress),
 ) -> Result<RescanReport> {
+    rescan_root_stoppable(engine, root, on_progress, &AtomicBool::new(false))
+}
+
+/// As `rescan_root_reporting`, ending early once `stop` is set, between one file and the next.
+pub fn rescan_root_stoppable(
+    engine: &Engine,
+    root: &Path,
+    on_progress: &dyn Fn(ScanProgress),
+    stop: &AtomicBool,
+) -> Result<RescanReport> {
     if !root.is_dir() {
         return Err(CoreError::io(root, std::io::Error::from(std::io::ErrorKind::NotFound)));
     }
     let mut report = RescanReport::default();
     let mut files = Vec::new();
-    walk(root, &mut files, &mut report.failed);
+    walk(root, &mut files, &mut report.failed, stop);
+    if stop.load(Ordering::SeqCst) {
+        report.stopped = true;
+        return Ok(report);
+    }
 
     let tracked = engine.tracked_under(root)?;
     // The walk does not enter generated folders, but a file kept before its folder became one is
@@ -109,6 +129,15 @@ pub fn rescan_root_reporting(
 
     let tracked_keys: std::collections::HashSet<String> =
         tracked.iter().filter_map(|t| canonical_key(&t.path).ok()).collect();
+
+    // A read going on after a pause or a stop does not read again what it already read. Size and
+    // time say a file has not changed, as they do for a build; a save that kept both is the price.
+    let read_so_far = engine.read_so_far(root)?;
+    let already_read: std::collections::HashMap<String, (u64, i64)> = tracked
+        .iter()
+        .filter(|t| t.latest.seq == 1 && read_so_far.contains(&t.item))
+        .filter_map(|t| Some((canonical_key(&t.path).ok()?, (t.latest.size, t.latest.created_at))))
+        .collect();
 
     // Vanished: tracked items whose file is gone. They are the pool for rename matching.
     let mut vanished: Vec<(usize, Known)> = tracked
@@ -145,6 +174,10 @@ pub fn rescan_root_reporting(
             progress.done = done;
             on_progress(progress);
         }
+        if stop.load(Ordering::SeqCst) {
+            report.stopped = true;
+            return Ok(report);
+        }
         progress.done_bytes += size(path);
         if is_dataless(path) {
             report.dataless.push(path.clone()); // reported, never hashed
@@ -169,6 +202,13 @@ pub fn rescan_root_reporting(
                 continue;
             }
         };
+        if let Some(&(size, saved_at)) = already_read.get(&key) {
+            let same = fs::symlink_metadata(path).is_ok_and(|m| m.len() == size && mtime_ms(&m) == saved_at);
+            if same {
+                report.unchanged += 1;
+                continue;
+            }
+        }
         if tracked_keys.contains(&key) {
             let result = engine.ingest_found(path);
             record(&mut report, path, result);
@@ -231,6 +271,7 @@ mod tests {
     use crate::engine::Engine;
     use crate::ports::{FakeClock, SeqIdGen};
     use std::fs;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     struct T {
@@ -250,7 +291,7 @@ mod tests {
 
     impl T {
         fn root(&self) -> PathBuf {
-            self.dir.path().join("work")
+            fs::canonicalize(self.dir.path()).unwrap().join("work")
         }
         fn put(&self, rel: &str, bytes: &[u8]) -> PathBuf {
             let p = self.root().join(rel);
@@ -559,6 +600,161 @@ mod tests {
         let r = t.rescan();
 
         assert_eq!((r.changed, r.unchanged, r.skipped), (0, 0, 0), "{r:?}");
+    }
+
+    fn stopped_after(t: &T, files_read: usize) -> RescanReport {
+        let stop = AtomicBool::new(false);
+        let on_progress = |p: ScanProgress| {
+            if p.done >= files_read {
+                stop.store(true, Ordering::SeqCst);
+            }
+        };
+        rescan_root_stoppable(&t.engine, &t.root(), &on_progress, &stop).unwrap()
+    }
+
+    #[test]
+    fn a_stopped_scan_ends_early() {
+        let t = setup();
+        for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+            t.put(name, name.as_bytes());
+        }
+        let r = stopped_after(&t, 2);
+        assert!(r.stopped);
+        assert_eq!(t.engine.vault_stats().unwrap().items, 2);
+    }
+
+    #[test]
+    fn a_stopped_scan_marks_nothing_missing() {
+        let t = setup();
+        let gone = t.put("a.txt", b"one");
+        t.put("b.txt", b"two");
+        t.put("c.txt", b"three");
+        t.rescan();
+        fs::remove_file(&gone).unwrap();
+        let r = stopped_after(&t, 1);
+        assert!(r.stopped);
+        assert_eq!(r.marked_missing, 0, "{r:?}");
+    }
+
+    #[test]
+    fn a_scan_stopped_before_it_starts_keeps_nothing() {
+        let t = setup();
+        t.put("sub/a.txt", b"one");
+        let stop = AtomicBool::new(true);
+        let r = rescan_root_stoppable(&t.engine, &t.root(), &|_| {}, &stop).unwrap();
+        assert!(r.stopped);
+        assert_eq!(t.engine.vault_stats().unwrap().items, 0);
+    }
+
+    #[test]
+    fn forgetting_a_stopped_read_leaves_the_vault_as_it_was() {
+        let t = setup();
+        let kept = t.put("kept.txt", b"kept");
+        t.rescan();
+        let before = t.engine.vault_stats().unwrap();
+        t.clock.advance(1_000);
+        t.engine.begin_read(&t.root()).unwrap();
+        let same_bytes = t.put("copy-of-kept.txt", b"kept");
+        let new = t.put("new.txt", b"new");
+        t.rescan();
+        let new_hash = crate::model::ContentHash::of_bytes(b"new");
+        assert!(t.engine.object_path(&new_hash).exists());
+
+        t.engine.forget_read(&t.root()).unwrap();
+
+        assert_eq!(t.engine.vault_stats().unwrap(), before);
+        assert!(!t.engine.is_tracked(&new));
+        assert!(!t.engine.is_tracked(&same_bytes));
+        assert!(t.engine.is_tracked(&kept));
+        assert!(!t.engine.object_path(&new_hash).exists(), "nothing else uses these bytes");
+        let shared = crate::model::ContentHash::of_bytes(b"kept");
+        assert!(t.engine.object_path(&shared).exists(), "the kept file still uses these bytes");
+        assert_eq!(fs::read(&new).unwrap(), b"new", "the person's own file is never touched");
+    }
+
+    #[test]
+    fn forgetting_spares_a_file_saved_again_since() {
+        let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
+        let p = t.put("a.txt", b"one");
+        t.rescan();
+        fs::write(&p, b"two").unwrap();
+        t.rescan();
+        t.engine.forget_read(&t.root()).unwrap();
+        assert!(t.engine.is_tracked(&p));
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
+    }
+
+    #[test]
+    fn forgetting_a_finished_read_takes_nothing_back() {
+        let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
+        let p = t.put("a.txt", b"one");
+        t.rescan();
+        t.engine.finish_read(&t.root()).unwrap();
+        t.engine.forget_read(&t.root()).unwrap();
+        assert!(t.engine.is_tracked(&p));
+    }
+
+    #[test]
+    fn forgetting_leaves_a_folder_whose_name_only_starts_the_same() {
+        let t = setup();
+        t.engine.begin_read(&t.root()).unwrap();
+        let sibling =
+            t.root().with_file_name(format!("{}-2", t.root().file_name().unwrap().to_string_lossy()));
+        fs::create_dir(&sibling).unwrap();
+        let p = sibling.join("a.txt");
+        fs::write(&p, b"one").unwrap();
+        rescan_root(&t.engine, &sibling).unwrap();
+        let inside = t.put("b.txt", b"two");
+        t.rescan();
+        t.engine.forget_read(&t.root()).unwrap();
+        assert!(t.engine.is_tracked(&p));
+        assert!(!t.engine.is_tracked(&inside));
+    }
+
+    /// A file kept by a read that has not ended, last saved at a time the clock has passed.
+    fn read_a_file(t: &T) -> PathBuf {
+        t.clock.advance(1_000_000);
+        t.engine.begin_read(&t.root()).unwrap();
+        let p = t.put("a.txt", b"one");
+        saved_at(&p, 100);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+        p
+    }
+
+    #[test]
+    fn going_on_with_a_read_passes_over_what_it_already_read() {
+        let t = setup();
+        let p = read_a_file(&t);
+        // The same size and time: only a scan that opens the file can tell the difference.
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 100);
+        let r = t.rescan();
+        assert_eq!(r.unchanged, 1, "{r:?}");
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 1);
+    }
+
+    #[test]
+    fn going_on_with_a_read_keeps_a_file_changed_since() {
+        let t = setup();
+        let p = read_a_file(&t);
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 200);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
+    }
+
+    #[test]
+    fn a_finished_read_passes_over_nothing() {
+        let t = setup();
+        let p = read_a_file(&t);
+        t.engine.finish_read(&t.root()).unwrap();
+        fs::write(&p, b"two").unwrap();
+        saved_at(&p, 100);
+        t.rescan();
+        assert_eq!(t.engine.vault_stats().unwrap().versions, 2);
     }
 
     #[test]

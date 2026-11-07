@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,7 @@ use folyvo_core::CoreError;
 
 use crate::api::AppApi;
 use crate::changes::ChangeWorker;
-use crate::dto::{EngineEventDto, FolderDto, ReadingDto};
+use crate::dto::{EngineEventDto, FolderDto, ReadingDto, ReadingState};
 use crate::errors::UserError;
 
 /// Receives every event the UI should hear about. The Tauri layer forwards them to the webviews.
@@ -42,18 +42,67 @@ fn seconds_left(elapsed_ms: i64, p: ScanProgress) -> Option<u32> {
     Some((by_files.max(by_bytes) / 1_000) as u32)
 }
 
+/// How long a paused or stopped read keeps what it read, in case the folder comes back. After that
+/// it is taken back: half a folder must not sit in the vault for good, looking kept.
+const PAUSE_LIMIT_MS: i64 = 24 * 60 * 60 * 1_000;
+
+/// How long the popover brings up a paused read. It must not nag for the whole day.
+const PAUSE_SHOWN_MS: i64 = 30 * 60 * 1_000;
+
+/// How often a running Folyvo looks at its paused reads.
+const PAUSE_CHECK_EVERY: Duration = Duration::from_secs(60);
+
+/// What the person asked of a read in progress.
+#[derive(Default)]
+struct Stop {
+    /// End after the file it is on.
+    now: AtomicBool,
+    /// And take back what it added, with the folder. Without this, the read is paused.
+    remove: AtomicBool,
+}
+
+impl Stop {
+    fn already_stopped() -> Stop {
+        Stop { now: AtomicBool::new(true), remove: AtomicBool::new(false) }
+    }
+}
+
+/// How `start_runner` left a folder.
+#[derive(Debug, PartialEq, Eq)]
+enum Started {
+    /// Read to the end and being watched; holds how many kept files the scan found changed.
+    Watching(usize),
+    /// Watched, with the rest of the read still to come.
+    Paused,
+    /// Gone, with what the read added.
+    Removed,
+}
+
 struct Reading {
     started_ms: i64,
     progress: ScanProgress,
+    state: ReadingState,
+    paused_at: Option<i64>,
+    /// How far this read had come before: the bar never goes back to it.
+    read_before: usize,
+    stop: Arc<Stop>,
 }
 
 impl Reading {
     fn dto(&self, now_ms: i64) -> ReadingDto {
         let p = self.progress;
         ReadingDto {
-            done: p.done as u32,
+            done: match p.total {
+                0 => p.done.max(self.read_before),
+                total => p.done.max(self.read_before).min(total),
+            } as u32,
             total: p.total as u32,
-            seconds_left: seconds_left(now_ms - self.started_ms, p),
+            seconds_left: (self.state == ReadingState::Reading)
+                .then(|| seconds_left(now_ms - self.started_ms, p))
+                .flatten(),
+            state: self.state,
+            quiet: self.state == ReadingState::Paused
+                && self.paused_at.is_some_and(|at| now_ms - at >= PAUSE_SHOWN_MS),
         }
     }
 }
@@ -64,7 +113,7 @@ pub struct AppRuntime {
     quiet: (i64, i64),
     runners: Mutex<HashMap<PathBuf, Runner>>,
     problems: Mutex<HashMap<PathBuf, UserError>>,
-    /// Folders whose first read has not ended. Reading one can take minutes.
+    /// Folders whose first read has not ended, paused ones too. Reading one can take minutes.
     reading: Mutex<HashMap<PathBuf, Reading>>,
     notifier: Arc<dyn Notifier>,
     changes: ChangeWorker,
@@ -102,16 +151,35 @@ impl AppRuntime {
             notifier,
             missed: AtomicUsize::new(0),
         });
+        if let Err(problem) = runtime.forget_pauses_that_ran_out() {
+            eprintln!("folyvo: could not take back a paused read: {}", problem.title);
+        }
+        let unfinished = runtime.engine.unfinished_reads()?;
+        let paused = runtime.engine.paused_reads()?;
         for root in runtime.engine.roots()? {
-            match runtime.start_runner(&root, &|_| {}) {
-                Ok(changed) => {
-                    runtime.missed.fetch_add(changed, Ordering::SeqCst);
+            let paused_at = paused.iter().find(|(path, _)| *path == root).map(|(_, at)| *at);
+            let problem = if !unfinished.contains(&root) {
+                match runtime.start_runner(&root, &|_| {}, &Stop::default()) {
+                    Ok(Started::Watching(changed)) => {
+                        runtime.missed.fetch_add(changed, Ordering::SeqCst);
+                        None
+                    }
+                    Ok(_) => None,
+                    Err(problem) => Some(problem),
                 }
-                Err(problem) => {
-                    runtime.problems.lock().unwrap().insert(root, problem);
-                }
+            } else if let Some(at) = paused_at {
+                runtime.stay_paused(&root, at).err()
+            } else {
+                // Folyvo closed during this read. It goes on behind the menu bar.
+                runtime.read_in_background(root.clone(), 0);
+                None
+            };
+            if let Some(problem) = problem {
+                runtime.problems.lock().unwrap().insert(root, problem);
             }
         }
+        let weak = Arc::downgrade(&runtime);
+        thread::spawn(move || look_after_paused_reads(weak));
         Ok(runtime)
     }
 
@@ -139,20 +207,44 @@ impl AppRuntime {
     /// Remembers the folder and returns; the first read goes on behind it and can take minutes.
     /// `folders()` shows how it is going, and a read that fails shows on the folder's row.
     pub fn add_folder(self: &Arc<Self>, folder: &Path) -> Result<(), UserError> {
-        self.engine.add_root(folder)?;
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        self.problems.lock().unwrap().remove(folder);
-        self.problems.lock().unwrap().remove(&canonical);
+        let state = self.reading.lock().unwrap().get(&canonical).map(|r| r.state);
+        match state {
+            // Added again while paused: the person wants the rest.
+            Some(ReadingState::Paused) => return self.resume_folder(folder),
+            Some(_) => return Ok(()),
+            None => {}
+        }
         if self.runners.lock().unwrap().contains_key(&canonical) {
             return Ok(());
         }
+        self.engine.begin_read(folder)?;
+        self.problems.lock().unwrap().remove(folder);
+        self.problems.lock().unwrap().remove(&canonical);
+        self.read_in_background(canonical, 0);
+        Ok(())
+    }
+
+    fn read_in_background(self: &Arc<Self>, canonical: PathBuf, shown_before: usize) {
+        let stop = Arc::new(Stop::default());
+        let read_so_far = self.engine.read_so_far(&canonical).map_or(0, |items| items.len());
         {
             let mut reading = self.reading.lock().unwrap();
             if reading.contains_key(&canonical) {
-                return Ok(());
+                return;
             }
             let started_ms = self.clock.now_unix_ms();
-            reading.insert(canonical.clone(), Reading { started_ms, progress: ScanProgress::default() });
+            reading.insert(
+                canonical.clone(),
+                Reading {
+                    started_ms,
+                    progress: ScanProgress::default(),
+                    state: ReadingState::Reading,
+                    paused_at: None,
+                    read_before: shown_before.max(read_so_far),
+                    stop: stop.clone(),
+                },
+            );
         }
         self.notifier.notify(EngineEventDto::RootsChanged);
         let rt = self.clone();
@@ -168,29 +260,131 @@ impl AppRuntime {
                     rt.notifier.notify(EngineEventDto::RootsChanged);
                 }
             };
-            if let Err(problem) = rt.start_runner(&canonical, &on_progress) {
-                rt.problems.lock().unwrap().insert(canonical.clone(), problem);
+            let started = rt.start_runner(&canonical, &on_progress, &stop);
+            if matches!(started, Ok(Started::Paused)) {
+                if let Some(reading) = rt.reading.lock().unwrap().get_mut(&canonical) {
+                    reading.state = ReadingState::Paused;
+                }
+                // Asked to take the folder away just as the pause took hold.
+                if stop.remove.load(Ordering::SeqCst) && rt.remove_folder(&canonical).is_err() {
+                    eprintln!("folyvo: could not remove {}", canonical.display());
+                }
+            } else {
+                if let Err(problem) = started {
+                    rt.problems.lock().unwrap().insert(canonical.clone(), problem);
+                }
+                rt.reading.lock().unwrap().remove(&canonical);
             }
-            rt.reading.lock().unwrap().remove(&canonical);
             rt.notifier.notify(EngineEventDto::RootsChanged);
         });
+    }
+
+    /// Watches a folder whose read was paused before Folyvo closed, without reading any more of it.
+    fn stay_paused(&self, root: &Path, paused_at: i64) -> Result<(), UserError> {
+        let stop = Arc::new(Stop::already_stopped());
+        let reading = Reading {
+            started_ms: self.clock.now_unix_ms(),
+            progress: ScanProgress::default(),
+            state: ReadingState::Paused,
+            paused_at: Some(paused_at),
+            read_before: self.engine.read_so_far(root).map_or(0, |items| items.len()),
+            stop: stop.clone(),
+        };
+        self.reading.lock().unwrap().insert(root.to_path_buf(), reading);
+        self.start_runner(root, &|_| {}, &stop).map(|_| ()).inspect_err(|_| {
+            self.reading.lock().unwrap().remove(root);
+        })
+    }
+
+    /// Ends a read after the file it is on. What was read stays, and the folder goes on being
+    /// watched, so no save is lost. The rest waits for `resume_folder`; past the time limit, what
+    /// was read is taken back.
+    pub fn pause_folder(&self, folder: &Path) -> Result<(), UserError> {
+        let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let mut reading = self.reading.lock().unwrap();
+        let Some(read) = reading.get_mut(&canonical) else { return Ok(()) };
+        if read.state != ReadingState::Reading {
+            return Ok(());
+        }
+        self.engine.pause_read(&canonical)?;
+        read.state = ReadingState::Pausing;
+        read.paused_at = Some(self.clock.now_unix_ms());
+        read.stop.now.store(true, Ordering::SeqCst);
+        drop(reading);
+        self.notifier.notify(EngineEventDto::RootsChanged);
         Ok(())
     }
 
-    /// A read cannot be stopped halfway, so a folder being read stays until the read ends.
+    /// Takes a paused folder out of the list and stops watching it. What was read waits until the
+    /// time limit: adding the folder again goes on from there.
+    pub fn stop_reading(&self, folder: &Path) -> Result<(), UserError> {
+        let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        {
+            let mut reading = self.reading.lock().unwrap();
+            if !reading.get(&canonical).is_some_and(|r| r.state == ReadingState::Paused) {
+                return Ok(());
+            }
+            reading.remove(&canonical);
+        }
+        drop(self.runners.lock().unwrap().remove(&canonical)); // stops the watcher thread
+        self.problems.lock().unwrap().remove(&canonical);
+        self.engine.stop_read(&canonical)?;
+        Ok(())
+    }
+
+    /// Goes on with a paused read. Files already read are not stored again.
+    pub fn resume_folder(self: &Arc<Self>, folder: &Path) -> Result<(), UserError> {
+        let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let shown_before = {
+            let mut reading = self.reading.lock().unwrap();
+            if !reading.get(&canonical).is_some_and(|r| r.state == ReadingState::Paused) {
+                return Ok(());
+            }
+            reading.remove(&canonical).map_or(0, |r| r.progress.done.max(r.read_before))
+        };
+        self.engine.resume_read(&canonical)?;
+        // The read watches again from its own start, so nothing saved in the gap is missed.
+        drop(self.runners.lock().unwrap().remove(&canonical));
+        self.read_in_background(canonical, shown_before);
+        Ok(())
+    }
+
+    fn forget_pauses_that_ran_out(&self) -> Result<(), UserError> {
+        let now = self.clock.now_unix_ms();
+        for (root, at) in self.engine.paused_reads()? {
+            if now - at >= PAUSE_LIMIT_MS {
+                self.remove_folder(&root)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A folder still being read is asked to stop; it goes when the read ends. A read that did not
+    /// finish gives back what it added. Anything else keeps its history.
     pub fn remove_folder(&self, folder: &Path) -> Result<(), UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        if self.reading.lock().unwrap().contains_key(&canonical) {
-            return Err(UserError::new(
-                "folder_busy",
-                "Folyvo is still reading that folder",
-                "Try again when it has finished.",
-            ));
+        {
+            let mut reading = self.reading.lock().unwrap();
+            match reading.get_mut(&canonical) {
+                Some(read) if read.state != ReadingState::Paused => {
+                    read.state = ReadingState::Stopping;
+                    read.stop.remove.store(true, Ordering::SeqCst);
+                    read.stop.now.store(true, Ordering::SeqCst);
+                    drop(reading);
+                    self.notifier.notify(EngineEventDto::RootsChanged);
+                    return Ok(());
+                }
+                Some(_) => {
+                    reading.remove(&canonical);
+                }
+                None => {}
+            }
         }
         let runner = self.runners.lock().unwrap().remove(&canonical);
         drop(runner); // stops the watcher thread
         self.problems.lock().unwrap().remove(folder);
         self.problems.lock().unwrap().remove(&canonical);
+        self.engine.forget_read(folder)?;
         self.engine.remove_root(folder)?;
         Ok(())
     }
@@ -211,11 +405,15 @@ impl AppRuntime {
             .collect()
     }
 
-    /// Returns how many kept files the first scan found changed.
-    fn start_runner(&self, folder: &Path, on_progress: &dyn Fn(ScanProgress)) -> Result<usize, UserError> {
+    fn start_runner(
+        &self,
+        folder: &Path,
+        on_progress: &dyn Fn(ScanProgress),
+        stop: &Stop,
+    ) -> Result<Started, UserError> {
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         if self.runners.lock().unwrap().contains_key(&canonical) {
-            return Ok(0);
+            return Ok(Started::Watching(0));
         }
         let on_applied: OnApplied = Arc::new(|applied| {
             if let Applied::Failed { path, reason } = applied {
@@ -229,14 +427,43 @@ impl AppRuntime {
             self.quiet,
             on_applied,
             on_progress,
+            &stop.now,
         )?;
+        if report.stopped && stop.remove.load(Ordering::SeqCst) {
+            drop(runner); // stops the watcher thread
+            self.engine.forget_read(folder)?;
+            self.engine.remove_root(folder)?;
+            self.notifier.notify(EngineEventDto::Resync);
+            return Ok(Started::Removed);
+        }
+        if report.stopped {
+            self.runners.lock().unwrap().insert(runner.folder().to_path_buf(), runner);
+            return Ok(Started::Paused);
+        }
         // Only the folder itself: one unreadable folder inside it must not stop the rest being kept.
         if report.failed.iter().any(|(path, _)| path == runner.folder()) {
             let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
             return Err(CoreError::io(runner.folder(), denied).into());
         }
+        self.engine.finish_read(runner.folder())?;
         self.runners.lock().unwrap().insert(runner.folder().to_path_buf(), runner);
-        Ok(report.changed)
+        Ok(Started::Watching(report.changed))
+    }
+}
+
+/// Runs for as long as Folyvo does, so a pause cannot outlast its limit while the app stays open
+/// and the popover hears when one has been showing long enough.
+fn look_after_paused_reads(runtime: Weak<AppRuntime>) {
+    loop {
+        thread::sleep(PAUSE_CHECK_EVERY);
+        let Some(runtime) = runtime.upgrade() else { return };
+        if let Err(problem) = runtime.forget_pauses_that_ran_out() {
+            eprintln!("folyvo: could not take back a paused read: {}", problem.title);
+        }
+        let any_paused = runtime.reading.lock().unwrap().values().any(|r| r.state == ReadingState::Paused);
+        if any_paused {
+            runtime.notifier.notify(EngineEventDto::RootsChanged);
+        }
     }
 }
 
@@ -428,7 +655,406 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_being_read_says_so_and_cannot_be_removed_yet() {
+    fn a_read_cut_short_goes_on_behind_the_menu_bar_when_folyvo_opens_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        for i in 0..500 {
+            fs::write(folder.join(format!("{i}.txt")), i.to_string()).unwrap();
+        }
+        {
+            let (rt, _rx) = start(dir.path());
+            rt.engine.begin_read(&folder).unwrap(); // and Folyvo closes before the read ends
+        }
+        let (rt, _rx) = start(dir.path());
+        assert!(rt.folders()[0].reading.is_some(), "opening must not wait for the read");
+        wait_until("the read to end", || rt.folders()[0].reading.is_none());
+        assert_eq!(rt.api().recent(1_000).unwrap().len(), 500);
+        assert!(rt.engine.unfinished_reads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_finished_read_is_not_read_again_as_unfinished() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        {
+            let (rt, _rx) = start(dir.path());
+            add_and_read(&rt, &folder);
+        }
+        let (rt, _rx) = start(dir.path());
+        assert!(rt.folders()[0].reading.is_none());
+        assert_eq!(recent_names(&rt), vec!["a.txt".to_string()]);
+    }
+
+    #[test]
+    fn stopping_takes_back_what_was_read_before_folyvo_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        let (rt, _rx) = start(dir.path());
+        rt.engine.begin_read(&folder).unwrap();
+        folyvo_core::rescan::rescan_root(&rt.engine, &fs::canonicalize(&folder).unwrap()).unwrap(); // the earlier session
+        fs::write(folder.join("b.txt"), b"two").unwrap();
+        let stop = Stop { remove: AtomicBool::new(true), ..Stop::default() };
+        let on_progress = |_: ScanProgress| stop.now.store(true, Ordering::SeqCst);
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Removed));
+        assert!(rt.folders().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one");
+    }
+
+    #[test]
+    fn removing_a_folder_whose_read_could_not_end_takes_back_what_it_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        let (rt, _rx) = start(dir.path());
+        rt.engine.begin_read(&folder).unwrap();
+        folyvo_core::rescan::rescan_root(&rt.engine, &fs::canonicalize(&folder).unwrap()).unwrap();
+        rt.remove_folder(&folder).unwrap();
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+        assert!(rt.folders().is_empty());
+    }
+
+    fn start_at(dir: &std::path::Path, clock: Arc<folyvo_core::ports::FakeClock>) -> Arc<AppRuntime> {
+        let (tx, _rx) = mpsc::channel();
+        AppRuntime::start(
+            &dir.join("vault"),
+            clock,
+            Arc::new(RandomIdGen),
+            (100, 100),
+            Arc::new(Collect(Mutex::new(tx))),
+        )
+        .unwrap()
+    }
+
+    fn state(rt: &AppRuntime) -> Option<ReadingState> {
+        rt.folders()[0].reading.as_ref().map(|r| r.state)
+    }
+
+    /// A folder of two files, its read paused after the first, as Folyvo closes.
+    fn paused_folder(dir: &std::path::Path, clock: &Arc<folyvo_core::ports::FakeClock>) -> PathBuf {
+        let folder = dir.join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        fs::write(folder.join("b.txt"), b"two").unwrap();
+        let rt = start_at(dir, clock.clone());
+        rt.engine.begin_read(&folder).unwrap();
+        let stop = Stop::default();
+        let on_progress = |p: ScanProgress| {
+            if p.done >= 1 {
+                stop.now.store(true, Ordering::SeqCst);
+            }
+        };
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Paused));
+        rt.engine.pause_read(&fs::canonicalize(&folder).unwrap()).unwrap();
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 1);
+        folder
+    }
+
+    #[test]
+    fn a_paused_read_keeps_what_it_read_and_goes_on_watching() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        fs::write(folder.join("b.txt"), b"two").unwrap();
+        let (rt, _rx) = start(dir.path());
+        rt.engine.begin_read(&folder).unwrap();
+        let stop = Stop::default();
+        let on_progress = |p: ScanProgress| {
+            if p.done >= 1 {
+                stop.now.store(true, Ordering::SeqCst);
+            }
+        };
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Paused));
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 1);
+        assert_eq!(rt.engine.unfinished_reads().unwrap().len(), 1);
+
+        fs::write(folder.join("a.txt"), b"saved while paused").unwrap();
+        wait_until("the save to be kept", || rt.engine.vault_stats().unwrap().versions == 2);
+    }
+
+    #[test]
+    fn a_pause_lasts_across_opening_folyvo_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        paused_folder(dir.path(), &clock);
+        clock.advance(PAUSE_LIMIT_MS - 1);
+        let rt = start_at(dir.path(), clock);
+        assert_eq!(state(&rt), Some(ReadingState::Paused));
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 1);
+        assert_eq!(rt.runners.lock().unwrap().len(), 1, "still watched");
+    }
+
+    #[test]
+    fn resuming_finishes_the_read_without_storing_anything_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock);
+        rt.resume_folder(&folder).unwrap();
+        wait_until("the read to end", || state(&rt).is_none());
+        let stats = rt.engine.vault_stats().unwrap();
+        assert_eq!((stats.items, stats.versions), (2, 2));
+        assert!(rt.engine.unfinished_reads().unwrap().is_empty());
+        assert_eq!(rt.api().recent(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_pause_that_runs_out_while_folyvo_is_closed_is_taken_back_on_opening() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        clock.advance(PAUSE_LIMIT_MS);
+        let rt = start_at(dir.path(), clock);
+        assert!(rt.folders().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+        assert!(rt.engine.paused_reads().unwrap().is_empty());
+        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one", "the person's own file stays");
+    }
+
+    #[test]
+    fn a_pause_that_runs_out_while_folyvo_is_open_is_taken_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock.clone());
+        rt.forget_pauses_that_ran_out().unwrap();
+        assert_eq!(state(&rt), Some(ReadingState::Paused), "the limit has not come");
+        clock.advance(PAUSE_LIMIT_MS);
+        rt.forget_pauses_that_ran_out().unwrap();
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+    }
+
+    #[test]
+    fn a_file_saved_during_a_pause_outlives_the_pause_as_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock.clone());
+        let first = rt.engine.vault_stats().unwrap().items;
+        assert_eq!(first, 1);
+        fs::write(folder.join("a.txt"), b"saved while paused").unwrap();
+        folyvo_core::rescan::rescan_root(&rt.engine, &fs::canonicalize(&folder).unwrap()).unwrap();
+        clock.advance(PAUSE_LIMIT_MS);
+        rt.forget_pauses_that_ran_out().unwrap();
+        assert!(rt.folders().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 1, "a.txt has two saves and stays");
+        assert_eq!(rt.api().recent(10).unwrap()[0].name, "a.txt");
+    }
+
+    #[test]
+    fn the_popover_stops_bringing_up_a_pause_after_half_an_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        paused_folder(dir.path(), &clock);
+        clock.advance(PAUSE_SHOWN_MS - 1);
+        let rt = start_at(dir.path(), clock.clone());
+        assert!(!rt.folders()[0].reading.clone().unwrap().quiet);
+        clock.advance(1);
+        let reading = rt.folders()[0].reading.clone().unwrap();
+        assert!(reading.quiet);
+        assert_eq!(reading.state, ReadingState::Paused, "only the popover goes quiet");
+    }
+
+    #[test]
+    fn stopping_a_paused_read_closes_it_at_once_and_stops_watching() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock);
+        rt.stop_reading(&folder).unwrap();
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 1, "what was read waits");
+        assert!(rt.api().recent(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adding_a_stopped_folder_again_goes_on_with_its_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock.clone());
+        rt.stop_reading(&folder).unwrap();
+        clock.advance(PAUSE_LIMIT_MS - 1);
+        rt.add_folder(&folder).unwrap();
+        assert_eq!(rt.folders().len(), 1);
+        wait_until("the read to end", || state(&rt).is_none());
+        let stats = rt.engine.vault_stats().unwrap();
+        assert_eq!((stats.items, stats.versions), (2, 2), "nothing is stored twice");
+        assert!(rt.engine.unfinished_reads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_read_that_runs_out_is_taken_back_and_starts_afresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock.clone());
+        rt.stop_reading(&folder).unwrap();
+        clock.advance(PAUSE_LIMIT_MS);
+        rt.forget_pauses_that_ran_out().unwrap();
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+        assert!(rt.engine.paused_reads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_folder_stays_out_of_the_list_on_opening_folyvo_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        {
+            let rt = start_at(dir.path(), clock.clone());
+            rt.stop_reading(&folder).unwrap();
+        }
+        let rt = start_at(dir.path(), clock);
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+    }
+
+    /// A folder of `files` files, its read paused after `read`, watched by a running Folyvo.
+    fn partly_read(dir: &std::path::Path, files: usize, read: usize) -> (Arc<AppRuntime>, PathBuf) {
+        let folder = dir.join("w");
+        fs::create_dir(&folder).unwrap();
+        for i in 0..files {
+            fs::write(folder.join(format!("{i:04}.txt")), i.to_string()).unwrap();
+        }
+        let (rt, _rx) = start(dir);
+        rt.engine.begin_read(&folder).unwrap();
+        let stop = Stop::default();
+        let on_progress = |p: ScanProgress| {
+            if p.done >= read {
+                stop.now.store(true, Ordering::SeqCst);
+            }
+        };
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Paused));
+        let read = rt.engine.vault_stats().unwrap().items as usize;
+        let canonical = fs::canonicalize(&folder).unwrap();
+        rt.engine.pause_read(&canonical).unwrap();
+        rt.reading.lock().unwrap().insert(
+            canonical,
+            Reading {
+                started_ms: 0,
+                progress: ScanProgress { done: read, total: files, ..ScanProgress::default() },
+                state: ReadingState::Paused,
+                paused_at: Some(0),
+                read_before: 0,
+                stop: Arc::new(Stop::already_stopped()),
+            },
+        );
+        (rt, folder)
+    }
+
+    /// Every count the bar shows until the read ends. None may be below what was read before.
+    fn assert_bar_never_goes_back(rt: &AppRuntime, before: u32) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while let Some(reading) = rt.folders()[0].reading.clone() {
+            assert!(reading.done >= before, "the bar went back to {} from {before}", reading.done);
+            assert!(Instant::now() < deadline, "the read did not end");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn the_bar_goes_on_from_where_a_paused_read_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rt, folder) = partly_read(dir.path(), 300, 100);
+        let before = rt.folders()[0].reading.clone().unwrap().done;
+        assert!(before >= 100);
+        rt.resume_folder(&folder).unwrap();
+        assert_bar_never_goes_back(&rt, before);
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 300);
+    }
+
+    #[test]
+    fn the_bar_goes_on_when_a_stopped_folder_is_added_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rt, folder) = partly_read(dir.path(), 300, 100);
+        let before = rt.engine.vault_stats().unwrap().items as u32;
+        rt.stop_reading(&folder).unwrap();
+        rt.add_folder(&folder).unwrap();
+        assert_bar_never_goes_back(&rt, before);
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 300);
+    }
+
+    #[test]
+    fn a_read_that_lost_files_does_not_show_more_read_than_there_are() {
+        let progress = ScanProgress { done: 1, total: 4, ..ScanProgress::default() };
+        let read = Reading {
+            started_ms: 0,
+            progress,
+            state: ReadingState::Reading,
+            paused_at: None,
+            read_before: 9,
+            stop: Arc::new(Stop::default()),
+        };
+        assert_eq!(read.dto(0).done, 4);
+    }
+
+    #[test]
+    fn adding_a_paused_folder_again_resumes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock);
+        rt.add_folder(&folder).unwrap();
+        wait_until("the read to end", || state(&rt).is_none());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 2);
+    }
+
+    #[test]
+    fn removing_a_paused_folder_takes_back_what_it_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(1_000));
+        let folder = paused_folder(dir.path(), &clock);
+        let rt = start_at(dir.path(), clock);
+        rt.remove_folder(&folder).unwrap();
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+        assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
+        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one");
+    }
+
+    #[test]
+    fn pausing_a_folder_that_is_not_being_read_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        let (rt, _rx) = start(dir.path());
+        add_and_read(&rt, &folder);
+        rt.pause_folder(&folder).unwrap();
+        rt.resume_folder(&folder).unwrap();
+        assert!(rt.engine.paused_reads().unwrap().is_empty());
+        assert_eq!(rt.runners.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stopping_a_read_leaves_the_folder_as_if_it_had_never_been_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("a.txt"), b"one").unwrap();
+        let (rt, _rx) = start(dir.path());
+        let stop = Stop { remove: AtomicBool::new(true), ..Stop::default() };
+        let on_progress = |_: ScanProgress| stop.now.store(true, Ordering::SeqCst);
+        assert_eq!(rt.start_runner(&folder, &on_progress, &stop), Ok(Started::Removed));
+        assert!(rt.folders().is_empty());
+        assert!(rt.runners.lock().unwrap().is_empty());
+        assert!(recent_names(&rt).is_empty());
+        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one");
+    }
+
+    #[test]
+    fn a_folder_being_read_says_so_and_stopping_it_asks_the_read_to_end() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("w");
         fs::create_dir(&folder).unwrap();
@@ -437,11 +1063,47 @@ mod tests {
         let canonical = fs::canonicalize(&folder).unwrap();
         rt.runners.lock().unwrap().remove(&canonical);
         let progress = ScanProgress { done: 1, total: 4, done_bytes: 25, total_bytes: 100 };
-        rt.reading.lock().unwrap().insert(canonical, Reading { started_ms: 0, progress });
+        let stop = Arc::new(Stop::default());
+        let read = Reading {
+            started_ms: 0,
+            progress,
+            state: ReadingState::Reading,
+            paused_at: None,
+            read_before: 0,
+            stop: stop.clone(),
+        };
+        rt.reading.lock().unwrap().insert(canonical, read);
         let reading = rt.folders()[0].reading.clone().unwrap();
-        assert_eq!((reading.done, reading.total), (1, 4));
-        assert_eq!(rt.remove_folder(&folder).unwrap_err().code, "folder_busy");
-        assert_eq!(rt.folders().len(), 1);
+        assert_eq!((reading.done, reading.total, reading.state), (1, 4, ReadingState::Reading));
+        assert_eq!(rt.remove_folder(&folder), Ok(()));
+        assert!(stop.now.load(Ordering::SeqCst) && stop.remove.load(Ordering::SeqCst));
+        assert_eq!(rt.folders().len(), 1, "the row stays until the read has ended");
+        assert_eq!(state(&rt), Some(ReadingState::Stopping));
+    }
+
+    #[test]
+    fn pausing_asks_the_read_to_end_and_keeps_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("w");
+        fs::create_dir(&folder).unwrap();
+        let (rt, _rx) = start(dir.path());
+        rt.engine.begin_read(&folder).unwrap();
+        let canonical = fs::canonicalize(&folder).unwrap();
+        let stop = Arc::new(Stop::default());
+        let read = Reading {
+            started_ms: 0,
+            progress: ScanProgress::default(),
+            state: ReadingState::Reading,
+            paused_at: None,
+            read_before: 0,
+            stop: stop.clone(),
+        };
+        rt.reading.lock().unwrap().insert(canonical.clone(), read);
+        assert_eq!(rt.pause_folder(&folder), Ok(()));
+        assert!(stop.now.load(Ordering::SeqCst));
+        assert!(!stop.remove.load(Ordering::SeqCst));
+        assert_eq!(state(&rt), Some(ReadingState::Pausing));
+        assert_eq!(rt.engine.paused_reads().unwrap().len(), 1);
     }
 
     #[test]

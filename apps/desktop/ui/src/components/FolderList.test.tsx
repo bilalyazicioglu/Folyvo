@@ -36,8 +36,26 @@ test("the section summary counts the folders", () => {
   expect(screen.getByText("Watched folders (2)")).toBeInTheDocument();
 });
 
-test("a folder being read says so and cannot be stopped yet", () => {
-  render(<FolderList folders={[{ ...ok, reading: { done: 8986, total: 17233, secondsLeft: 120 } }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+const reading = (state: "reading" | "pausing" | "paused" | "stopping") => ({ done: 8986, total: 17233, secondsLeft: 120, state, quiet: false });
+
+test("a folder being read says so and says that removing it stops the read", async () => {
+  const onRemove = vi.fn();
+  render(<FolderList folders={[{ ...ok, reading: reading("reading") }]} onRemove={onRemove} busy={false} defaultOpen />);
   expect(screen.getByText("Reading…")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Stop watching Client work" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "Stop and remove Client work" }));
+  expect(onRemove).toHaveBeenCalledWith(ok.path);
+});
+
+test("a paused folder says so and can be removed", async () => {
+  const onRemove = vi.fn();
+  render(<FolderList folders={[{ ...ok, reading: reading("paused") }]} onRemove={onRemove} busy={false} defaultOpen />);
+  expect(screen.getByText("Paused")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Stop and remove Client work" }));
+  expect(onRemove).toHaveBeenCalledWith(ok.path);
+});
+
+test("a folder asked to stop says so and cannot be asked twice", () => {
+  render(<FolderList folders={[{ ...ok, reading: reading("stopping") }]} onRemove={vi.fn()} busy={false} defaultOpen />);
+  expect(screen.getByText("Stopping…")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Stop and remove Client work" })).toBeDisabled();
 });

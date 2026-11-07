@@ -287,6 +287,22 @@ pub struct ReadingDto {
     pub total: u32,
     /// Unknown until enough has been read to tell.
     pub seconds_left: Option<u32>,
+    pub state: ReadingState,
+    /// Paused for so long that the popover stops bringing it up. The folder's row still says so.
+    pub quiet: bool,
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ReadingState {
+    Reading,
+    /// Asked to pause, and ending after the file it is on.
+    Pausing,
+    /// What was read stays and the folder is watched, until the time limit.
+    Paused,
+    /// Asked to take the folder away, and ending after the file it is on.
+    Stopping,
 }
 
 /// How a copy left: saved to a folder through Folyvo, or handed to another app.

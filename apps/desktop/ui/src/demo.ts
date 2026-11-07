@@ -175,6 +175,9 @@ export function demoHandlers() {
     reveal: (_: Args) => undefined,
     add_folder: (_: Args) => undefined,
     remove_folder: (_: Args) => undefined,
+    pause_folder: (_: Args) => undefined,
+    resume_folder: (_: Args) => undefined,
+    stop_reading: (_: Args) => undefined,
   } satisfies Record<string, (a: Args) => unknown>;
 }
 

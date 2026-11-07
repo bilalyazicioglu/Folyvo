@@ -7,6 +7,7 @@ use crate::model::{
     Version, VersionId, VersionOrigin,
 };
 use std::collections::HashMap;
+use std::path::MAIN_SEPARATOR_STR;
 
 const VERSION_COLS: &str = "id, item_id, seq, content_hash, size, created_at, origin, restored_from, note";
 
@@ -232,13 +233,125 @@ pub(crate) fn insert_root(c: &Connection, path: &str, now: i64) -> Result<()> {
     Ok(())
 }
 
+/// What taking back a file left to clean up outside the database.
+pub(crate) struct ForgottenItem {
+    pub key: Option<String>,
+    pub hash: ContentHash,
+    pub object_unused: bool,
+}
+
+/// Removes an item only while it is still as a first read left it: one save, never sent anywhere.
+pub(crate) fn forget_new_item(c: &Connection, item: &ItemId) -> Result<Option<ForgottenItem>> {
+    let id = item.as_str();
+    let versions: i64 =
+        c.query_row("SELECT COUNT(*) FROM versions WHERE item_id = ?1", [id], |r| r.get(0))?;
+    let events: i64 =
+        c.query_row("SELECT COUNT(*) FROM share_events WHERE item_id = ?1", [id], |r| r.get(0))?;
+    if versions != 1 || events != 0 {
+        return Ok(None);
+    }
+    let Some(version) = latest_version(c, item)? else { return Ok(None) };
+    let key = c
+        .query_row("SELECT canonical_key FROM locations WHERE item_id = ?1 AND is_current = 1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let vid = version.id.as_str();
+    c.execute("DELETE FROM version_change_counts WHERE version_id = ?1", [vid])?;
+    c.execute("DELETE FROM version_changes WHERE version_id = ?1", [vid])?;
+    c.execute("DELETE FROM versions WHERE id = ?1", [vid])?;
+    c.execute("DELETE FROM locations WHERE item_id = ?1", [id])?;
+    c.execute("DELETE FROM items WHERE id = ?1", [id])?;
+    let hash = version.content_hash;
+    let object_unused = c.execute(
+        "DELETE FROM objects WHERE content_hash = ?1
+         AND NOT EXISTS (SELECT 1 FROM versions WHERE content_hash = ?1)",
+        [hash.as_str()],
+    )? > 0;
+    Ok(Some(ForgottenItem { key, hash, object_unused }))
+}
+
+pub(crate) fn begin_read(c: &Connection, path: &str, now: i64) -> Result<()> {
+    c.execute(
+        "INSERT INTO watched_roots(path, added_at, reading_since) VALUES (?1, ?2, ?2)
+         ON CONFLICT(path) DO UPDATE SET
+             reading_since = COALESCE(reading_since, excluded.reading_since),
+             read_paused_at = NULL,
+             read_stopped = 0",
+        params![path, now],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn finish_read(c: &Connection, path: &str) -> Result<()> {
+    c.execute(
+        "UPDATE watched_roots SET reading_since = NULL, read_paused_at = NULL WHERE path = ?1",
+        [path],
+    )?;
+    Ok(())
+}
+
+/// Only a read still going can be paused.
+pub(crate) fn pause_read(c: &Connection, path: &str, now: i64) -> Result<()> {
+    c.execute(
+        "UPDATE watched_roots SET read_paused_at = ?2 WHERE path = ?1 AND reading_since IS NOT NULL",
+        params![path, now],
+    )?;
+    Ok(())
+}
+
+/// The folder leaves the list, and what was read waits until the time limit in case it comes back.
+pub(crate) fn stop_read(c: &Connection, path: &str, now: i64) -> Result<()> {
+    c.execute(
+        "UPDATE watched_roots SET read_paused_at = ?2, read_stopped = 1 WHERE path = ?1 AND reading_since IS NOT NULL",
+        params![path, now],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn resume_read(c: &Connection, path: &str) -> Result<()> {
+    c.execute("UPDATE watched_roots SET read_paused_at = NULL WHERE path = ?1", [path])?;
+    Ok(())
+}
+
+pub(crate) fn paused_reads(c: &Connection) -> Result<Vec<(String, i64)>> {
+    let mut stmt = c.prepare(
+        "SELECT path, read_paused_at FROM watched_roots WHERE read_paused_at IS NOT NULL ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn unfinished_reads(c: &Connection) -> Result<Vec<String>> {
+    let mut stmt = c.prepare(
+        "SELECT path FROM watched_roots WHERE reading_since IS NOT NULL AND read_stopped = 0 ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+/// The items first seen under `root` since its unfinished read began. None once it has finished.
+pub(crate) fn items_of_read(c: &Connection, root: &str) -> Result<Vec<ItemId>> {
+    let mut stmt = c.prepare(
+        "SELECT i.id FROM watched_roots r
+         JOIN items i ON i.created_at >= r.reading_since
+         JOIN locations l ON l.item_id = i.id AND l.is_current = 1
+         WHERE r.path = ?1 AND substr(l.path, 1, length(r.path) + 1) = r.path || ?2",
+    )?;
+    let rows = stmt.query_map([root, MAIN_SEPARATOR_STR], |r| {
+        let id: String = r.get(0)?;
+        ItemId::parse(&id).map_err(|e| conv(0, e))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub(crate) fn delete_root(c: &Connection, path: &str) -> Result<()> {
     c.execute("DELETE FROM watched_roots WHERE path = ?1", [path])?;
     Ok(())
 }
 
 pub(crate) fn list_roots(c: &Connection) -> Result<Vec<String>> {
-    let mut stmt = c.prepare("SELECT path FROM watched_roots ORDER BY id")?;
+    let mut stmt = c.prepare("SELECT path FROM watched_roots WHERE read_stopped = 0 ORDER BY id")?;
     let rows = stmt.query_map([], |r| r.get(0))?;
     Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
 }
@@ -287,11 +400,22 @@ pub(crate) fn set_note(c: &Connection, version: &VersionId, note: Option<&str>) 
     Ok(c.execute("UPDATE versions SET note = ?2 WHERE id = ?1", params![version.as_str(), note])? > 0)
 }
 
+/// Newest save first, without what an unfinished read is bringing in: thousands of files read for
+/// the first time are not news, and would push out the ones the person knows. A file saved since
+/// it was read is news, and is listed.
 pub(crate) fn recent_items(c: &Connection, limit: u32) -> Result<Vec<ItemId>> {
     let mut stmt = c.prepare(
-        "SELECT item_id FROM versions GROUP BY item_id ORDER BY MAX(created_at) DESC, MAX(seq) DESC, item_id ASC LIMIT ?1",
+        "SELECT v.item_id FROM versions v
+         WHERE NOT EXISTS (
+             SELECT 1 FROM watched_roots r
+             JOIN items i ON i.id = v.item_id AND i.created_at >= r.reading_since
+             JOIN locations l ON l.item_id = i.id AND l.is_current = 1
+             WHERE substr(l.path, 1, length(r.path) + 1) = r.path || ?2
+               AND (SELECT COUNT(*) FROM versions o WHERE o.item_id = v.item_id) = 1
+         )
+         GROUP BY v.item_id ORDER BY MAX(v.created_at) DESC, MAX(v.seq) DESC, v.item_id ASC LIMIT ?1",
     )?;
-    let rows = stmt.query_map([limit], |r| {
+    let rows = stmt.query_map(params![limit, MAIN_SEPARATOR_STR], |r| {
         let id: String = r.get(0)?;
         ItemId::parse(&id).map_err(|e| conv(0, e))
     })?;

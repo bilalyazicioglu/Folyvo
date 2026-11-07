@@ -238,6 +238,66 @@ impl Engine {
     }
 
     pub fn add_root(&self, path: &Path) -> Result<()> {
+        let root = self.usable_root(path)?;
+        let g = self.lock();
+        repo::insert_root(g.store.conn(), &root.to_string_lossy(), self.clock.now_unix_ms())?;
+        drop(g);
+        self.emit(EngineEvent::RootsChanged);
+        Ok(())
+    }
+
+    /// As `add_root`, and notes that the folder's read has begun. Until `finish_read`, files new
+    /// since then stay out of the list and can be taken back, even after Folyvo has closed.
+    /// A read that was already going, paused or stopped goes on, and keeps the time it began.
+    pub fn begin_read(&self, path: &Path) -> Result<()> {
+        let root = self.usable_root(path)?;
+        let g = self.lock();
+        repo::begin_read(g.store.conn(), &root.to_string_lossy(), self.clock.now_unix_ms())?;
+        drop(g);
+        self.emit(EngineEvent::RootsChanged);
+        Ok(())
+    }
+
+    pub fn finish_read(&self, root: &Path) -> Result<()> {
+        repo::finish_read(self.lock().store.conn(), &root.to_string_lossy())
+    }
+
+    pub fn pause_read(&self, root: &Path) -> Result<()> {
+        repo::pause_read(self.lock().store.conn(), &root.to_string_lossy(), self.clock.now_unix_ms())
+    }
+
+    /// The folder leaves `roots`. What was read stays out of the list, for `begin_read` to go on
+    /// from or `forget_read` to take back.
+    pub fn stop_read(&self, root: &Path) -> Result<()> {
+        let g = self.lock();
+        repo::stop_read(g.store.conn(), &root.to_string_lossy(), self.clock.now_unix_ms())?;
+        drop(g);
+        self.emit(EngineEvent::RootsChanged);
+        Ok(())
+    }
+
+    pub fn resume_read(&self, root: &Path) -> Result<()> {
+        repo::resume_read(self.lock().store.conn(), &root.to_string_lossy())
+    }
+
+    /// Paused and stopped reads, each with when that happened.
+    pub fn paused_reads(&self) -> Result<Vec<(PathBuf, i64)>> {
+        let g = self.lock();
+        Ok(repo::paused_reads(g.store.conn())?.into_iter().map(|(p, at)| (PathBuf::from(p), at)).collect())
+    }
+
+    /// Folders whose read began and has not ended, paused or not.
+    pub fn unfinished_reads(&self) -> Result<Vec<PathBuf>> {
+        let g = self.lock();
+        Ok(repo::unfinished_reads(g.store.conn())?.into_iter().map(PathBuf::from).collect())
+    }
+
+    /// The files an unfinished read of `root` has brought in so far.
+    pub fn read_so_far(&self, root: &Path) -> Result<Vec<ItemId>> {
+        repo::items_of_read(self.lock().store.conn(), &root.to_string_lossy())
+    }
+
+    fn usable_root(&self, path: &Path) -> Result<PathBuf> {
         let root = fs::canonicalize(path).map_err(|e| CoreError::io(path, e))?;
         if !root.is_dir() {
             return Err(CoreError::io(&root, std::io::Error::other("not a folder")));
@@ -246,11 +306,7 @@ impl Engine {
         if root.starts_with(&vault) || vault.starts_with(&root) {
             return Err(CoreError::RootOverlapsVault(root));
         }
-        let g = self.lock();
-        repo::insert_root(g.store.conn(), &root.to_string_lossy(), self.clock.now_unix_ms())?;
-        drop(g);
-        self.emit(EngineEvent::RootsChanged);
-        Ok(())
+        Ok(root)
     }
 
     /// Works for a root whose folder is gone or unmounted: it is removed under the text it was
@@ -261,6 +317,35 @@ impl Engine {
         repo::delete_root(g.store.conn(), &path.to_string_lossy())?;
         drop(g);
         self.emit(EngineEvent::RootsChanged);
+        Ok(())
+    }
+
+    /// Takes back what an unfinished read of `root` added, as if it had never run, however many
+    /// times Folyvo closed along the way. The person's own files are not touched. A file saved
+    /// again or sent since then has become real history and stays. A finished read gives nothing back.
+    pub fn forget_read(&self, root: &Path) -> Result<()> {
+        let mut g = self.lock();
+        let inner = &mut *g;
+        let tx = inner.store.conn_mut().transaction()?;
+        let mut items = repo::items_of_read(&tx, &root.to_string_lossy())?;
+        items.extend(repo::items_of_read(&tx, &real_path(root).to_string_lossy())?);
+        let mut forgotten = Vec::new();
+        for item in &items {
+            if let Some(found) = repo::forget_new_item(&tx, item)? {
+                forgotten.push((item, found));
+            }
+        }
+        tx.commit()?;
+        let mut tracked = self.tracked.write().unwrap_or_else(|p| p.into_inner());
+        for (item, found) in &forgotten {
+            if let Some(key) = &found.key {
+                tracked.remove(key);
+            }
+            if found.object_unused {
+                inner.cas.remove_object(&found.hash)?;
+            }
+            let _ = fs::remove_dir_all(inner.cas.root().join("exports").join(item.as_str()));
+        }
         Ok(())
     }
 
@@ -872,6 +957,124 @@ mod tests {
     fn a_root_that_does_not_exist_is_an_io_error() {
         let t = setup();
         assert!(matches!(t.engine.add_root(&t.dir.path().join("nope")), Err(CoreError::Io { .. })));
+    }
+
+    #[test]
+    fn a_read_still_going_keeps_its_new_files_out_of_the_list() {
+        let mut t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.save(&work.join("older.docx"), b"older");
+        t.clock.advance(1_000);
+        t.engine.begin_read(&work).unwrap();
+        let read = work.join("read.docx");
+        t.save(&read, b"read");
+        t.save(&work.with_file_name("elsewhere.docx"), b"elsewhere");
+        let names = |t: &T| -> Vec<String> {
+            t.engine.list_recent(10).unwrap().into_iter().map(|s| s.name).collect()
+        };
+        assert_eq!(names(&t), vec!["elsewhere.docx", "older.docx"]);
+        assert!(t.engine.is_tracked(&read));
+
+        t.engine.finish_read(&work).unwrap();
+        assert!(names(&t).contains(&"read.docx".to_string()));
+    }
+
+    #[test]
+    fn a_read_still_going_does_not_use_up_the_limit() {
+        let mut t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.save(&work.join("older.docx"), b"older");
+        t.clock.advance(1_000);
+        t.engine.begin_read(&work).unwrap();
+        for i in 0..3 {
+            t.save(&work.join(format!("read{i}.docx")), format!("{i}").as_bytes());
+        }
+        let names: Vec<String> = t.engine.list_recent(1).unwrap().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["older.docx"]);
+    }
+
+    #[test]
+    fn an_unfinished_read_is_remembered_until_it_ends() {
+        let t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.engine.add_root(&work).unwrap();
+        assert!(t.engine.unfinished_reads().unwrap().is_empty(), "adding alone is not a read");
+        t.engine.begin_read(&work).unwrap();
+        assert_eq!(t.engine.unfinished_reads().unwrap(), vec![work.clone()]);
+        t.engine.finish_read(&work).unwrap();
+        assert!(t.engine.unfinished_reads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_file_saved_since_it_was_read_is_listed_during_the_read() {
+        let mut t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.engine.begin_read(&work).unwrap();
+        let read = work.join("read.docx");
+        t.save(&read, b"one");
+        assert!(t.engine.list_recent(10).unwrap().is_empty());
+        t.save(&read, b"two");
+        assert_eq!(t.engine.list_recent(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pause_is_remembered_until_the_read_resumes_or_ends() {
+        let t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.engine.pause_read(&work).unwrap();
+        assert!(t.engine.paused_reads().unwrap().is_empty(), "nothing is being read yet");
+        t.engine.begin_read(&work).unwrap();
+        t.engine.pause_read(&work).unwrap();
+        assert_eq!(t.engine.paused_reads().unwrap(), vec![(work.clone(), 1_000)]);
+        assert_eq!(t.engine.unfinished_reads().unwrap(), vec![work.clone()]);
+        t.engine.resume_read(&work).unwrap();
+        assert!(t.engine.paused_reads().unwrap().is_empty());
+        assert_eq!(t.engine.unfinished_reads().unwrap(), vec![work.clone()], "resuming is not finishing");
+        t.engine.pause_read(&work).unwrap();
+        t.engine.finish_read(&work).unwrap();
+        assert!(t.engine.paused_reads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_read_leaves_the_folders_and_comes_back_when_added_again() {
+        let mut t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.engine.begin_read(&work).unwrap();
+        t.save(&work.join("read.docx"), b"read");
+        t.engine.stop_read(&work).unwrap();
+        assert!(t.engine.roots().unwrap().is_empty());
+        assert!(t.engine.unfinished_reads().unwrap().is_empty());
+        assert_eq!(t.engine.paused_reads().unwrap().len(), 1, "it still has a time limit");
+        assert!(t.engine.list_recent(10).unwrap().is_empty());
+
+        t.clock.advance(1_000);
+        t.engine.begin_read(&work).unwrap();
+        assert_eq!(t.engine.roots().unwrap(), vec![work.clone()]);
+        assert_eq!(t.engine.unfinished_reads().unwrap(), vec![work.clone()]);
+        assert!(t.engine.paused_reads().unwrap().is_empty());
+        assert!(t.engine.list_recent(10).unwrap().is_empty(), "the read has not ended yet");
+        t.engine.forget_read(&work).unwrap();
+        assert_eq!(t.engine.vault_stats().unwrap().items, 0, "it kept the time it first began");
+    }
+
+    #[test]
+    fn beginning_again_keeps_when_the_read_first_began() {
+        let mut t = setup();
+        let work = fs::canonicalize(t.dir.path().join("work")).unwrap();
+        t.engine.begin_read(&work).unwrap();
+        t.save(&work.join("read.docx"), b"read");
+        t.clock.advance(1_000);
+        t.engine.begin_read(&work).unwrap();
+        assert!(t.engine.list_recent(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_read_cannot_begin_inside_the_vault() {
+        let t = setup();
+        assert!(matches!(
+            t.engine.begin_read(&t.dir.path().join("vault")),
+            Err(CoreError::RootOverlapsVault(_))
+        ));
     }
 
     #[test]
