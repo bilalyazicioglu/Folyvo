@@ -25,6 +25,12 @@ if [ "$(read_key NSExtension:NSExtensionPointIdentifier)" = "com.apple.FinderSyn
 else
   fail "a Finder Sync extension"
 fi
+app_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$here/../../apps/desktop/src-tauri/tauri.conf.json")"
+if [ "$(read_key CFBundleShortVersionString)" = "$app_version" ]; then
+  pass "the version is the app's"
+else
+  fail "the version is the app's ($(read_key CFBundleShortVersionString), app $app_version)"
+fi
 expect_status "the signature verifies" 0 codesign --verify --strict "$appex"
 codesign -d --entitlements - --xml "$appex" >"$out/ent.xml" 2>/dev/null || true
 assert_grep "sandboxed" "com.apple.security.app-sandbox" "$out/ent.xml"
