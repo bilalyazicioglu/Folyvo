@@ -49,6 +49,9 @@ const PAUSE_LIMIT_MS: i64 = 24 * 60 * 60 * 1_000;
 /// How long the popover brings up a paused read. It must not nag for the whole day.
 const PAUSE_SHOWN_MS: i64 = 30 * 60 * 1_000;
 
+/// How often older saves are let go while Folyvo stays open.
+const TIDY_EVERY_MS: i64 = 24 * 60 * 60 * 1_000;
+
 /// How often a running Folyvo looks at its paused reads.
 const PAUSE_CHECK_EVERY: Duration = Duration::from_secs(60);
 
@@ -120,6 +123,9 @@ pub struct AppRuntime {
     missed: AtomicUsize,
     /// Kept folders looked over at launch, behind the menu bar, with how to stop each.
     checking: Mutex<HashMap<PathBuf, Arc<Stop>>>,
+    /// When older saves were last let go, by this run of Folyvo.
+    last_tidy: Mutex<Option<i64>>,
+    tidying: AtomicBool,
 }
 
 impl AppRuntime {
@@ -153,6 +159,8 @@ impl AppRuntime {
             notifier,
             missed: AtomicUsize::new(0),
             checking: Mutex::new(HashMap::new()),
+            last_tidy: Mutex::new(None),
+            tidying: AtomicBool::new(false),
         });
         if let Err(problem) = runtime.forget_pauses_that_ran_out() {
             eprintln!("folyvo: could not take back a paused read: {}", problem.title);
@@ -188,6 +196,8 @@ impl AppRuntime {
     /// is watched from the moment its check starts, so a save made meanwhile is not lost.
     fn check_in_background(self: &Arc<Self>, roots: Vec<PathBuf>) {
         if roots.is_empty() {
+            let rt = self.clone();
+            thread::spawn(move || rt.tidy());
             return;
         }
         let stops: Vec<_> = {
@@ -224,7 +234,42 @@ impl AppRuntime {
                 }
                 rt.notifier.notify(EngineEventDto::RootsChanged);
             }
+            // Once the check has kept what changed while Folyvo was closed.
+            rt.tidy();
         });
+    }
+
+    /// Lets go of older saves now, if the rule is on.
+    fn tidy(&self) {
+        if self.tidying.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        match self.engine.let_go_of_older_saves() {
+            Ok(gone) if gone.saves > 0 => self.notifier.notify(EngineEventDto::RootsChanged),
+            Ok(_) => {}
+            Err(e) => eprintln!("folyvo: could not let go of older saves: {e}"),
+        }
+        *self.last_tidy.lock().unwrap() = Some(self.clock.now_unix_ms());
+        self.tidying.store(false, Ordering::SeqCst);
+    }
+
+    /// Lets go of older saves once a day while Folyvo stays open.
+    pub fn tidy_if_due(&self) {
+        let last = *self.last_tidy.lock().unwrap();
+        if last.is_none_or(|at| self.clock.now_unix_ms() - at >= TIDY_EVERY_MS) {
+            self.tidy();
+        }
+    }
+
+    /// Takes the person's answer about older saves; a yes lets them go now.
+    pub fn set_letting_go(self: &Arc<Self>, on: bool) -> Result<(), UserError> {
+        self.engine.set_letting_go(on)?;
+        self.notifier.notify(EngineEventDto::RootsChanged);
+        if on {
+            let rt = self.clone();
+            thread::spawn(move || rt.tidy());
+        }
+        Ok(())
     }
 
     pub fn api(&self) -> AppApi {
@@ -512,6 +557,7 @@ fn look_after_paused_reads(runtime: Weak<AppRuntime>) {
         if let Err(problem) = runtime.forget_pauses_that_ran_out() {
             eprintln!("folyvo: could not take back a paused read: {}", problem.title);
         }
+        runtime.tidy_if_due();
         let any_paused = runtime.reading.lock().unwrap().values().any(|r| r.state == ReadingState::Paused);
         if any_paused {
             runtime.notifier.notify(EngineEventDto::RootsChanged);
@@ -833,6 +879,80 @@ mod tests {
         rt.remove_folder(&folder).unwrap();
         assert_eq!(rt.engine.vault_stats().unwrap().items, 0);
         assert!(rt.folders().is_empty());
+    }
+
+    const DAY: i64 = 24 * 60 * 60 * 1_000;
+
+    /// A kept folder with a file saved three times a month ago, its middle save older than the
+    /// rule keeps, and the rule as `on` leaves it.
+    fn month_old_saves(dir: &std::path::Path, now: i64, on: Option<bool>) -> PathBuf {
+        let folder = dir.join("w");
+        fs::create_dir(&folder).unwrap();
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(now - 30 * DAY));
+        let engine = Engine::open(&dir.join("vault"), clock.clone(), Arc::new(RandomIdGen)).unwrap();
+        engine.add_root(&fs::canonicalize(&folder).unwrap()).unwrap();
+        let file = fs::canonicalize(&folder).unwrap().join("a.txt");
+        for (n, at) in [(1, now - 30 * DAY), (2, now - 30 * DAY + 1_000), (3, now - 30 * DAY + 2_000)] {
+            fs::write(&file, format!("save {n}")).unwrap();
+            clock.set(at);
+            engine.ingest_path(&file).unwrap();
+        }
+        if let Some(on) = on {
+            engine.set_letting_go(on).unwrap();
+        }
+        folder
+    }
+
+    #[test]
+    fn older_saves_go_after_the_check_at_launch_once_the_rule_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = 20_000 * DAY + DAY / 2;
+        month_old_saves(dir.path(), now, Some(true));
+        let rt = start_at(dir.path(), Arc::new(folyvo_core::ports::FakeClock::new(now)));
+        wait_until("older saves to go", || rt.engine.older_saves().unwrap().saves == 0);
+        assert_eq!(rt.engine.last_let_go().unwrap().map(|l| l.saves), Some(1));
+    }
+
+    #[test]
+    fn nothing_goes_at_launch_while_the_rule_is_unasked() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = 20_000 * DAY + DAY / 2;
+        month_old_saves(dir.path(), now, None);
+        let rt = start_at(dir.path(), Arc::new(folyvo_core::ports::FakeClock::new(now)));
+        wait_until("the check", || checked(&rt));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(rt.engine.older_saves().unwrap().saves, 1);
+    }
+
+    #[test]
+    fn turning_the_rule_on_lets_older_saves_go_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = 20_000 * DAY + DAY / 2;
+        month_old_saves(dir.path(), now, None);
+        let rt = start_at(dir.path(), Arc::new(folyvo_core::ports::FakeClock::new(now)));
+        wait_until("the check", || checked(&rt));
+        rt.set_letting_go(true).unwrap();
+        wait_until("older saves to go", || rt.engine.older_saves().unwrap().saves == 0);
+    }
+
+    #[test]
+    fn older_saves_go_again_a_day_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = 20_000 * DAY + DAY / 2;
+        month_old_saves(dir.path(), now, Some(true));
+        let clock = Arc::new(folyvo_core::ports::FakeClock::new(now));
+        let rt = start_at(dir.path(), clock.clone());
+        wait_until("the first tidy", || rt.engine.last_let_go().unwrap().is_some());
+        let file = fs::canonicalize(dir.path().join("w")).unwrap().join("a.txt");
+        for n in 4..=5 {
+            fs::write(&file, format!("save {n}")).unwrap();
+            rt.engine.ingest_path(&file).unwrap(); // today: kept for now
+        }
+        assert_eq!(rt.engine.older_saves().unwrap().saves, 0);
+        clock.set(now + 20 * DAY);
+        assert!(rt.engine.older_saves().unwrap().saves > 0);
+        rt.tidy_if_due();
+        assert_eq!(rt.engine.older_saves().unwrap().saves, 0);
     }
 
     fn start_at(dir: &std::path::Path, clock: Arc<folyvo_core::ports::FakeClock>) -> Arc<AppRuntime> {

@@ -1,9 +1,11 @@
 use folyvo_compare::{Mark, Marked, MarkedBlock, ParaStyle, Section, Span};
 use folyvo_core::engine::{EngineEvent, ItemSummary, Save, VaultStats, VersionView};
 use folyvo_core::export::ExportResult;
+use folyvo_core::letgo::{LastLetGo, LetGo, Rule};
 use folyvo_core::model::{
     ChangeOutcome, ChangeRecord, ChangeUnit, ShareEvent, ShareEventKind, Version, VersionOrigin,
 };
+use folyvo_core::space::{FileSpace, Space};
 use folyvo_core::which::Match;
 use serde::Serialize;
 use ts_rs::TS;
@@ -159,6 +161,101 @@ impl From<VersionView> for VersionDto {
             code: v.code,
             change: v.change.map(ChangeDto::from),
         }
+    }
+}
+
+/// Whether older saves are let go; unasked until the person has seen the rule.
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RuleDto {
+    Unasked,
+    On,
+    Off,
+}
+
+impl From<Rule> for RuleDto {
+    fn from(r: Rule) -> Self {
+        match r {
+            Rule::Unasked => RuleDto::Unasked,
+            Rule::On => RuleDto::On,
+            Rule::Off => RuleDto::Off,
+        }
+    }
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LetGoDto {
+    pub saves: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+impl From<LetGo> for LetGoDto {
+    fn from(l: LetGo) -> Self {
+        Self { saves: l.saves as u32, bytes: l.bytes }
+    }
+}
+
+#[derive(Serialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LastLetGoDto {
+    #[ts(type = "number")]
+    pub at: i64,
+    pub saves: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+impl From<LastLetGo> for LastLetGoDto {
+    fn from(l: LastLetGo) -> Self {
+        Self { at: l.at, saves: l.saves as u32, bytes: l.bytes }
+    }
+}
+
+/// The rule for older saves, what it would let go now, and what it let go last.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LettingGoDto {
+    pub rule: RuleDto,
+    pub waiting: LetGoDto,
+    pub last: Option<LastLetGoDto>,
+}
+
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FileSpaceDto {
+    pub item_id: String,
+    pub name: String,
+    pub saves: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+impl From<FileSpace> for FileSpaceDto {
+    fn from(f: FileSpace) -> Self {
+        Self { item_id: f.item.as_str().to_string(), name: f.name, saves: f.saves as u32, bytes: f.bytes }
+    }
+}
+
+/// The room Folyvo takes on this Mac, and the files that take the most.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SpaceDto {
+    #[ts(type = "number")]
+    pub bytes: u64,
+    pub files: Vec<FileSpaceDto>,
+}
+
+impl From<Space> for SpaceDto {
+    fn from(s: Space) -> Self {
+        Self { bytes: s.bytes, files: s.files.into_iter().map(Into::into).collect() }
     }
 }
 

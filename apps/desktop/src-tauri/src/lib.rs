@@ -97,6 +97,10 @@ pub fn run() {
             commands::stop_reading,
             commands::open_history,
             commands::open_all_files,
+            commands::open_space,
+            commands::space,
+            commands::letting_go,
+            commands::set_letting_go,
             commands::suggested_folders,
             commands::finish_first_window,
             commands::hide_popover,
@@ -157,7 +161,7 @@ pub fn run() {
                 }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    let open = [tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW];
+                    let open = [tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW, tray::SPACE];
                     if let Some(w) = open.iter().find_map(|label| app.get_webview_window(label)) {
                         let _ = w.unminimize();
                         let _ = w.show();
@@ -190,7 +194,7 @@ mod tests {
         let caps: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         let windows = caps["windows"].as_array().unwrap();
-        for label in ["popover", tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW] {
+        for label in ["popover", tray::VERSIONS, tray::ALL_FILES, tray::FIRST_WINDOW, tray::SPACE] {
             assert!(windows.iter().any(|w| w == label), "{label}");
         }
     }

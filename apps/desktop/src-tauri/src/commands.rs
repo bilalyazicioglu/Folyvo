@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use crate::dto::{
-    ActivityDto, CopyDto, ExportDto, FolderDto, ItemSummaryDto, MarkedPageDto, MatchDto, PreviewDto,
-    RestoreDto, VaultStatsDto, VersionDto,
+    ActivityDto, CopyDto, ExportDto, FolderDto, ItemSummaryDto, LettingGoDto, MarkedPageDto, MatchDto,
+    PreviewDto, RestoreDto, SpaceDto, VaultStatsDto, VersionDto,
 };
 use crate::errors::UserError;
 use crate::runtime::AppRuntime;
@@ -245,6 +245,30 @@ pub fn finish_first_window(app: AppHandle) -> Result<(), UserError> {
 #[tauri::command]
 pub fn open_all_files(app: AppHandle) -> Result<(), UserError> {
     crate::tray::open_all_files(&app).map_err(|_| UserError::internal())
+}
+
+#[tauri::command]
+pub fn open_space(app: AppHandle) -> Result<(), UserError> {
+    crate::tray::open_space(&app).map_err(|_| UserError::internal())
+}
+
+/// Measuring reads every stored file's blocks, so it runs off the main thread.
+#[tauri::command]
+pub async fn space(rt: Rt<'_>, top: u32) -> Result<SpaceDto, UserError> {
+    let api = rt.api();
+    blocking(move || api.space(top)).await
+}
+
+#[tauri::command]
+pub async fn letting_go(rt: Rt<'_>) -> Result<LettingGoDto, UserError> {
+    let api = rt.api();
+    blocking(move || api.letting_go()).await
+}
+
+#[tauri::command]
+pub async fn set_letting_go(rt: Rt<'_>, on: bool) -> Result<(), UserError> {
+    let runtime = rt.inner().clone();
+    blocking(move || runtime.set_letting_go(on)).await
 }
 
 /// The popover asks for the height of its content; the window follows within limits.
