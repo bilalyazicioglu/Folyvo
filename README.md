@@ -18,7 +18,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/folyvo-demo.gif" alt="Folyvo opened from the menu bar: a document's saved times, an earlier save with one paragraph removed, and Restore, which saves the current file first so nothing is lost" width="720">
+  <picture>
+    <source srcset="https://raw.githubusercontent.com/bilalyazicioglu/Folyvo/main/docs/assets/folyvo-demo.avif" type="image/avif">
+    <img src="docs/assets/folyvo-demo.gif" alt="Folyvo opened from the menu bar: a document's saved times, an earlier save with one paragraph removed, and Restore, which saves the current file first so nothing is lost" width="720">
+  </picture>
 </p>
 
 ---
