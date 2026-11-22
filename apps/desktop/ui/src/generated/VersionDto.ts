@@ -6,4 +6,8 @@ export type VersionDto = { id: string, seq: number, createdAt: number, size: num
 /**
  * What changed since the save before; none until it has been worked out.
  */
-change: ChangeDto | null, };
+change: ChangeDto | null, 
+/**
+ * Marked to keep whatever the rule for older saves says.
+ */
+keep: boolean, };
