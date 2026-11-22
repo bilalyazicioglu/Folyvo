@@ -72,14 +72,8 @@ impl Engine {
     /// What the rule would let go now, whether or not it is on. The bytes count each save in full,
     /// so a stored file two saves share is counted for both: at most what would be freed.
     pub fn older_saves(&self) -> Result<LetGo> {
-        let g = self.lock();
-        let c = g.store.conn();
-        let gone = self.saves_to_let_go(c)?;
-        let mut bytes = 0;
-        for (_, v) in &gone {
-            bytes += repo::version(c, v)?.map_or(0, |v| v.size);
-        }
-        Ok(LetGo { saves: gone.len(), bytes })
+        let gone = self.saves_to_let_go(self.lock().store.conn())?;
+        Ok(LetGo { saves: gone.len(), bytes: gone.iter().map(|(_, _, size)| size).sum() })
     }
 
     /// Lets go of what the rule says, if it is on, and their space with them.
@@ -121,7 +115,7 @@ impl Engine {
             inner.store.conn_mut().transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut gone = self.saves_to_let_go(&tx)?;
         gone.truncate(batch);
-        let ids: Vec<VersionId> = gone.iter().map(|(_, v)| v.clone()).collect();
+        let ids: Vec<VersionId> = gone.iter().map(|(_, v, _)| v.clone()).collect();
         let deleted = repo::delete_versions(&tx, &ids)?;
         if deleted.versions.is_empty() {
             return Ok(LetGo::default());
@@ -132,8 +126,11 @@ impl Engine {
             inner.cas.remove_object(hash)?;
         }
         drop(g);
-        let items: HashSet<ItemId> =
-            gone.into_iter().filter(|(_, v)| deleted.versions.contains(v)).map(|(item, _)| item).collect();
+        let items: HashSet<ItemId> = gone
+            .into_iter()
+            .filter(|(_, v, _)| deleted.versions.contains(v))
+            .map(|(item, _, _)| item)
+            .collect();
         for item in items {
             self.emit(EngineEvent::ItemUpdated { item });
         }
@@ -153,14 +150,18 @@ impl Engine {
         }))
     }
 
-    fn saves_to_let_go(&self, c: &rusqlite::Connection) -> Result<Vec<(ItemId, VersionId)>> {
+    /// Each save the rule lets go, with its file and its size.
+    fn saves_to_let_go(&self, c: &rusqlite::Connection) -> Result<Vec<(ItemId, VersionId, u64)>> {
         let now = self.clock.now_unix_ms();
         let mut out = Vec::new();
         let saves = repo::saves_for_letting_go(c)?;
         for chunk in saves.chunk_by(|a, b| a.0 == b.0) {
             let item = &chunk[0].0;
             let file: Vec<Save> = chunk.iter().map(|(_, s)| s.clone()).collect();
-            out.extend(to_let_go(&file, now, &local_day).into_iter().map(|v| (item.clone(), v)));
+            for v in to_let_go(&file, now, &local_day) {
+                let size = file.iter().find(|s| s.id == v).map_or(0, |s| s.size);
+                out.push((item.clone(), v, size));
+            }
         }
         Ok(out)
     }
@@ -181,6 +182,7 @@ pub struct Save {
     pub at: i64,
     /// Marked, sent, written a note on, or of a file whose every save is kept.
     pub protected: bool,
+    pub size: u64,
 }
 
 /// The saves of one file, oldest first, that the rule lets go at `now`. `day_of` tells which
@@ -210,7 +212,7 @@ mod tests {
     }
 
     fn save(n: u32, at: i64) -> Save {
-        Save { id: VersionId::parse(&format!("ver_{n:04}")).unwrap(), at, protected: false }
+        Save { id: VersionId::parse(&format!("ver_{n:04}")).unwrap(), at, protected: false, size: 0 }
     }
 
     fn gone(saves: &[Save]) -> Vec<String> {

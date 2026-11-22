@@ -606,7 +606,7 @@ pub(crate) fn set_keep_all(c: &Connection, item: &ItemId, keep: bool) -> Result<
 /// Every save, each file's oldest first, with whether something keeps it whatever its age.
 pub(crate) fn saves_for_letting_go(c: &Connection) -> Result<Vec<(ItemId, crate::letgo::Save)>> {
     let mut stmt = c.prepare(
-        "SELECT v.item_id, v.id, v.created_at,
+        "SELECT v.item_id, v.id, v.created_at, v.size,
                 v.keep = 1 OR i.keep_all = 1 OR (v.note IS NOT NULL AND v.note <> '')
                 OR EXISTS (SELECT 1 FROM share_events s WHERE s.version_id = v.id)
          FROM versions v JOIN items i ON i.id = v.item_id
@@ -620,7 +620,8 @@ pub(crate) fn saves_for_letting_go(c: &Connection) -> Result<Vec<(ItemId, crate:
             crate::letgo::Save {
                 id: VersionId::parse(&id).map_err(|e| conv(1, e))?,
                 at: r.get(2)?,
-                protected: r.get(3)?,
+                size: r.get::<_, i64>(3)? as u64,
+                protected: r.get(4)?,
             },
         ))
     })?;
