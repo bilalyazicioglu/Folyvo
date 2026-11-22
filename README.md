@@ -17,6 +17,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License: GPL-3.0-or-later"></a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/folyvo-demo.gif" alt="Folyvo opened from the menu bar: a document's saved times, an earlier save with one paragraph removed, and Restore, which saves the current file first so nothing is lost" width="720">
+</p>
+
 ---
 
 You shorten a proposal, change a few numbers, save over a paragraph you meant to keep. Usually the old file is gone behind the new one. With Folyvo running, your earlier saves are still there.
