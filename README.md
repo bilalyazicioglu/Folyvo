@@ -19,13 +19,14 @@
 
 ---
 
-You shorten a proposal, change a few numbers, save over a paragraph you meant to keep. Usually the old file is gone behind the new one. With Folyvo running, every earlier save is still there.
+You shorten a proposal, change a few numbers, save over a paragraph you meant to keep. Usually the old file is gone behind the new one. With Folyvo running, your earlier saves are still there.
 
 Choose a folder. Then work in Word, Excel, or any app you already use. There is nothing to set up for each file and no new words to learn.
 
 ## What it does
 
-- **Keeps every save.** Each time a file in your folder is saved, Folyvo keeps that version. Open it from the menu bar or from Finder's right-click menu.
+- **Keeps your saves.** Each time a file in your folder is saved, Folyvo keeps that version. Open it from the menu bar or from Finder's right-click menu.
+- **Stays small.** A file that never changed takes no extra room, and the menu bar shows how much Folyvo uses. Every save from the last 14 days stays, then one a day; saves you mark, send or write a note on stay for good. Folyvo asks before it first lets any go, and you can keep every save instead.
 - **Shows what changed.** Under each saved time, a line says what changed since the save before: "2 paragraphs changed", "3 cells changed", "Page 2 changed". One click shows the page with the changes marked. Works for Word, Excel, PDF and plain text.
 - **Takes you back.** See your file as it was at any saved time. Restore it, or open a separate copy in Word and keep going.
 - **Remembers which copy left your Mac.** Share a saved version through Mail, AirDrop or Messages, and Folyvo notes it next to that version: "Attached in Mail 10:14".
