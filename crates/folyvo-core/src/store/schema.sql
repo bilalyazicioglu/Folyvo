@@ -84,3 +84,5 @@ CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE INDEX versions_by_restored_from ON versions(restored_from) WHERE restored_from IS NOT NULL;
+CREATE INDEX changes_by_compared_to ON version_changes(compared_to) WHERE compared_to IS NOT NULL;
