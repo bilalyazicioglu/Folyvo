@@ -37,6 +37,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .popover__actions { display: flex; align-items: center; justify-content: space-between; }
 .popover__all { min-height: 36px; padding: 0 4px; text-decoration: none; color: var(--ink); }
 .popover__quit { min-height: 36px; margin-left: auto; padding: 0 4px; text-decoration: none; color: var(--muted); font-size: 12px; }
+.popover__space { min-height: 36px; margin-left: auto; padding: 0 8px; text-decoration: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.popover__space + .popover__quit { margin-left: 0; }
 .popover__keeping { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .popover__keeping .btn--link { min-height: 36px; text-decoration: none; color: var(--ink); }
 .popover .folders { flex: 1; min-width: 0; margin: 0; }
@@ -240,6 +242,25 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .notice > div { flex: 1; }
 .notice p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 .notice--error { box-shadow: 0 0 0 1px var(--danger); }
+.notice__actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 8px; }
+.notice__actions .btn { min-height: 28px; }
+.notice__actions .btn--link { text-decoration: none; color: var(--ink); }
+
+/* The Space window: how much room Folyvo takes, what takes the most, and the rule for older saves. */
+.space { height: 100%; display: flex; flex-direction: column; background: transparent; }
+.space__head { flex: none; height: 52px; }
+.space__body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 24px; }
+.space h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.space h2 { margin: 24px 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.space__hint { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.space__rule { margin: 0; font-size: 13px; }
+.space__files { margin: 0 -10px; padding: 0; list-style: none; }
+.space__file { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); font: inherit; text-align: left; }
+.space__file:hover { background: var(--hover); }
+.space__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.space__saves { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.space__bytes { min-width: 64px; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.space__toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; }
 .notice--error strong { color: var(--danger); }
 
 .empty { padding: 28px 20px; text-align: center; }

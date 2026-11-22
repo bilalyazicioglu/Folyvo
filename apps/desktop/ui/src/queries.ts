@@ -12,6 +12,8 @@ export const useHistory = (item?: string) =>
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: api.stats });
 export const useFolders = () => useQuery({ queryKey: ["folders"], queryFn: api.folders });
 export const useMissed = () => useQuery({ queryKey: ["missed"], queryFn: api.missedWhileClosed });
+export const useSpace = (top: number) => useQuery({ queryKey: ["space", top], queryFn: () => api.space(top) });
+export const useLettingGo = () => useQuery({ queryKey: ["letting-go"], queryFn: api.lettingGo });
 export const useActivity = (from: number, to: number) =>
   useQuery({ queryKey: ["activity", from, to], queryFn: () => api.activity(from, to) });
 /** A version's picture never changes, so it is drawn once per window. */
