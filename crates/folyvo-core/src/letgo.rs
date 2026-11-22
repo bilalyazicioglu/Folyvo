@@ -37,6 +37,8 @@ pub struct LastLetGo {
 
 const RULE: &str = "letting_go";
 const LAST: &str = "last_let_go";
+/// How many saves go between two looks at the vault by everything else.
+const BATCH: usize = 200;
 
 impl Engine {
     pub fn letting_go(&self) -> Result<Rule> {
@@ -82,25 +84,48 @@ impl Engine {
 
     /// Lets go of what the rule says, if it is on, and their space with them.
     pub fn let_go_of_older_saves(&self) -> Result<LetGo> {
+        self.let_go_in_batches_of(BATCH)
+    }
+
+    /// A few saves at a time, letting go of the vault in between so saves go on being kept.
+    pub(crate) fn let_go_in_batches_of(&self, batch: usize) -> Result<LetGo> {
         if self.letting_go()? != Rule::On {
             return Ok(LetGo::default());
         }
+        let mut done = LetGo::default();
+        loop {
+            let step = self.let_go_some(batch)?;
+            if step.saves == 0 {
+                break;
+            }
+            done.saves += step.saves;
+            done.bytes += step.bytes;
+        }
+        if done.saves > 0 {
+            let at = self.clock.now_unix_ms();
+            repo::set_setting(
+                self.lock().store.conn(),
+                LAST,
+                &format!("{at} {} {}", done.saves, done.bytes),
+            )?;
+        }
+        Ok(done)
+    }
+
+    fn let_go_some(&self, batch: usize) -> Result<LetGo> {
         let mut g = self.lock();
         let inner = &mut *g;
         // Writing from the start: no other process can mark, note or send a save between it
         // being chosen and let go.
         let tx =
             inner.store.conn_mut().transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let gone = self.saves_to_let_go(&tx)?;
+        let mut gone = self.saves_to_let_go(&tx)?;
+        gone.truncate(batch);
         let ids: Vec<VersionId> = gone.iter().map(|(_, v)| v.clone()).collect();
         let deleted = repo::delete_versions(&tx, &ids)?;
         if deleted.versions.is_empty() {
             return Ok(LetGo::default());
         }
-        let done =
-            LetGo { saves: deleted.versions.len(), bytes: deleted.unused.iter().map(|(_, size)| size).sum() };
-        let at = self.clock.now_unix_ms();
-        repo::set_setting(&tx, LAST, &format!("{at} {} {}", done.saves, done.bytes))?;
         tx.commit()?;
         // A file left behind by a crash here has no row, and goes when the vault next opens.
         for (hash, _) in &deleted.unused {
@@ -112,7 +137,7 @@ impl Engine {
         for item in items {
             self.emit(EngineEvent::ItemUpdated { item });
         }
-        Ok(done)
+        Ok(LetGo { saves: deleted.versions.len(), bytes: deleted.unused.iter().map(|(_, size)| size).sum() })
     }
 
     pub fn last_let_go(&self) -> Result<Option<LastLetGo>> {
@@ -460,6 +485,19 @@ mod engine_tests {
             let old = &before.iter().find(|(id, _)| *id == v.id).unwrap().1;
             assert!(old.starts_with(&v.code), "{old} must still find the save its code is now {}", v.code);
         }
+    }
+
+    #[test]
+    fn letting_go_a_few_at_a_time_takes_them_all_and_counts_them_together() {
+        let t = setup();
+        t.month_old("a.docx");
+        t.month_old("b.docx");
+        t.month_old("c.docx");
+        t.engine.set_letting_go(true).unwrap();
+        let gone = t.engine.let_go_in_batches_of(1).unwrap();
+        assert_eq!(gone.saves, 3);
+        assert_eq!(t.engine.older_saves().unwrap().saves, 0);
+        assert_eq!(t.engine.last_let_go().unwrap().map(|l| (l.saves, l.bytes)), Some((3, gone.bytes)));
     }
 
     #[test]
