@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{CoreError, Result};
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 const SCHEMA: &str = include_str!("schema.sql");
 
 /// v1 -> v2: the share-ready mark is gone, copies handed to another app are recorded.
@@ -65,9 +65,25 @@ ALTER TABLE locations ADD COLUMN seen_size INTEGER;
 ALTER TABLE locations ADD COLUMN seen_mtime INTEGER;
 ";
 
+/// v5 -> v6: saves and files the person wants kept whatever the rule for older saves says, and
+/// whether that rule was shown and taken.
+const MIGRATE_5_TO_6: &str = "
+ALTER TABLE versions ADD COLUMN keep INTEGER NOT NULL DEFAULT 0 CHECK (keep IN (0, 1));
+ALTER TABLE items ADD COLUMN keep_all INTEGER NOT NULL DEFAULT 0 CHECK (keep_all IN (0, 1));
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+";
+
 /// Each step takes a database from the version before it to its own.
-const STEPS: &[(i64, &str)] =
-    &[(2, MIGRATE_1_TO_2), (3, MIGRATE_2_TO_3), (4, MIGRATE_3_TO_4), (5, MIGRATE_4_TO_5)];
+const STEPS: &[(i64, &str)] = &[
+    (2, MIGRATE_1_TO_2),
+    (3, MIGRATE_2_TO_3),
+    (4, MIGRATE_3_TO_4),
+    (5, MIGRATE_4_TO_5),
+    (6, MIGRATE_5_TO_6),
+];
 
 /// Upgrade a database from `from` one step at a time, each step in its own transaction. The write
 /// lock is taken first and the version read again inside it, so a second process that arrives
@@ -109,7 +125,7 @@ impl Store {
                 conn.execute_batch(SCHEMA)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1..=4 => migrate(&mut conn, version)?,
+            1..=5 => migrate(&mut conn, version)?,
             SCHEMA_VERSION => {}
             other => return Err(CoreError::Corrupt(format!("unsupported database schema version {other}"))),
         }
@@ -371,6 +387,38 @@ mod tests {
         assert_eq!(v, SCHEMA_VERSION);
         assert!(has(&s, "table", "version_changes") && has(&s, "table", "version_change_counts"));
         assert_eq!(count(&s, "versions"), 1);
+    }
+
+    #[test]
+    fn a_v5_database_keeps_its_saves_with_nothing_marked_and_the_rule_unasked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folyvo.db");
+        {
+            let c = rusqlite::Connection::open(&path).unwrap();
+            c.execute_batch(include_str!("schema_v2.sql")).unwrap();
+            for sql in [MIGRATE_2_TO_3, MIGRATE_3_TO_4, MIGRATE_4_TO_5] {
+                c.execute_batch(sql).unwrap();
+            }
+            c.execute_batch(
+                "INSERT INTO items(id,display_name,created_at) VALUES ('itm_a','a.docx',1);
+                 INSERT INTO objects(content_hash,size,stored_at) VALUES ('b3_x',1,1);
+                 INSERT INTO versions(id,item_id,seq,content_hash,size,created_at,origin) VALUES
+                   ('ver_1','itm_a',1,'b3_x',1,1,'initial');",
+            )
+            .unwrap();
+            c.pragma_update(None, "user_version", 5).unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let (keep, keep_all): (i64, i64) = s
+            .conn()
+            .query_row(
+                "SELECT v.keep, i.keep_all FROM versions v JOIN items i ON i.id = v.item_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((keep, keep_all), (0, 0));
+        assert_eq!(repo::setting(s.conn(), "letting_go").unwrap(), None);
     }
 
     #[test]
