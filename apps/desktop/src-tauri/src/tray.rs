@@ -129,6 +129,9 @@ pub const VERSIONS: &str = "versions";
 /// The label of the window that lists every kept file.
 pub const ALL_FILES: &str = "files";
 
+/// The label of the window that tells how much room Folyvo takes.
+pub const SPACE: &str = "space";
+
 /// The label of the window shown on first launch.
 pub const FIRST_WINDOW: &str = "first";
 
@@ -138,7 +141,7 @@ const TRAY_ID: &str = "folyvo";
 /// person can switch back to it like to any app. Otherwise it lives in the menu bar only.
 pub fn in_dock<'a>(open: impl IntoIterator<Item = &'a str>, closing: Option<&str>) -> bool {
     open.into_iter()
-        .any(|label| [VERSIONS, ALL_FILES, FIRST_WINDOW].contains(&label) && closing != Some(label))
+        .any(|label| [VERSIONS, ALL_FILES, FIRST_WINDOW, SPACE].contains(&label) && closing != Some(label))
 }
 
 /// Shows or hides Folyvo in the Dock and Command-Tab to match the windows open now.
@@ -213,6 +216,37 @@ pub fn open_all_files(app: &AppHandle) -> tauri::Result<()> {
         .transparent(true);
     let window = builder.build()?;
     window_glass(&window);
+    #[cfg(target_os = "macos")]
+    {
+        let size = window.inner_size()?;
+        window.set_size(tauri::PhysicalSize::new(size.width + 1, size.height))?;
+        window.set_size(size)?;
+    }
+    follow_windows(app, None);
+    window.set_focus()
+}
+
+/// How much room Folyvo takes, and the rule for older saves.
+pub fn open_space(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(SPACE) {
+        w.show()?;
+        w.set_focus()?;
+        follow_windows(app, None);
+        return Ok(());
+    }
+    let builder = WebviewWindowBuilder::new(app, SPACE, WebviewUrl::App("index.html?view=space".into()))
+        .title("Space")
+        .inner_size(480.0, 560.0)
+        .min_inner_size(400.0, 420.0);
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(22.0, 28.0))
+        .transparent(true);
+    let window = builder.build()?;
+    window_glass(&window);
+    // As for All Files: a resize puts the window controls where they were asked to be.
     #[cfg(target_os = "macos")]
     {
         let size = window.inner_size()?;
@@ -384,6 +418,7 @@ mod tests {
         assert!(!in_dock(["popover"], None));
         assert!(in_dock(["popover", VERSIONS], None));
         assert!(in_dock(["popover", ALL_FILES], None));
+        assert!(in_dock(["popover", SPACE], None));
         assert!(in_dock(["popover", FIRST_WINDOW], None));
         assert!(!in_dock(["popover", VERSIONS], Some(VERSIONS)), "the window being closed no longer counts");
         assert!(in_dock([VERSIONS, ALL_FILES], Some(VERSIONS)), "the other one is still open");

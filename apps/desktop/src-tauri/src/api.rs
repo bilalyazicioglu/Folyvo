@@ -7,8 +7,8 @@ use folyvo_core::model::{ItemId, VersionId};
 use base64::Engine as _;
 
 use crate::dto::{
-    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, MarkedPageDto, MatchDto, PreviewDto, RestoreDto,
-    VaultStatsDto, VersionDto,
+    ActivityDto, CopyDto, ExportDto, ItemSummaryDto, LettingGoDto, MarkedPageDto, MatchDto, PreviewDto,
+    RestoreDto, SpaceDto, VaultStatsDto, VersionDto,
 };
 use crate::errors::UserError;
 use crate::preview;
@@ -162,6 +162,22 @@ impl AppApi {
     pub fn stats(&self) -> Result<VaultStatsDto, UserError> {
         Ok(self.engine.vault_stats()?.into())
     }
+
+    pub fn space(&self, top: u32) -> Result<SpaceDto, UserError> {
+        Ok(self.engine.space(top as usize)?.into())
+    }
+
+    pub fn letting_go(&self) -> Result<LettingGoDto, UserError> {
+        Ok(LettingGoDto {
+            rule: self.engine.letting_go()?.into(),
+            waiting: self.engine.older_saves()?.into(),
+            last: self.engine.last_let_go()?.map(Into::into),
+        })
+    }
+
+    pub fn set_letting_go(&self, on: bool) -> Result<(), UserError> {
+        Ok(self.engine.set_letting_go(on)?)
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +187,29 @@ mod tests {
     use folyvo_core::ports::{FakeClock, SeqIdGen};
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn the_rule_for_older_saves_starts_unasked_with_what_it_would_let_go() {
+        let r = rig();
+        let state = r.api.letting_go().unwrap();
+        assert_eq!(state.rule, crate::dto::RuleDto::Unasked);
+        assert_eq!((state.waiting.saves, state.waiting.bytes), (0, 0));
+        assert!(state.last.is_none());
+        r.api.set_letting_go(false).unwrap();
+        assert_eq!(r.api.letting_go().unwrap().rule, crate::dto::RuleDto::Off);
+    }
+
+    #[test]
+    fn the_room_taken_lists_files_with_their_saves() {
+        let r = rig();
+        r.save("a.docx", &vec![1u8; 4096]);
+        r.save("a.docx", &vec![2u8; 4096]);
+        let space = r.api.space(10).unwrap();
+        assert_eq!(space.files.len(), 1);
+        assert_eq!((space.files[0].name.as_str(), space.files[0].saves), ("a.docx", 2));
+        assert_eq!(space.files[0].item_id, r.item());
+        assert!(space.bytes >= 4096);
+    }
 
     struct Rig {
         dir: tempfile::TempDir,
