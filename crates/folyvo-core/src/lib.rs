@@ -23,6 +23,7 @@ pub mod events;
 pub mod export;
 pub mod handed;
 pub mod ignore;
+pub mod letgo;
 pub mod reconcile;
 pub mod rescan;
 pub mod restore;

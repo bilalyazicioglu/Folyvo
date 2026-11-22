@@ -1142,6 +1142,7 @@ name = "folyvo-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "jiff 1.0.2",
  "notify",
  "proptest",
  "reflink-copy",

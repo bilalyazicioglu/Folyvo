@@ -2,7 +2,8 @@ CREATE TABLE items (
     id            TEXT PRIMARY KEY,
     display_name  TEXT    NOT NULL,
     created_at    INTEGER NOT NULL,
-    missing       INTEGER NOT NULL DEFAULT 0 CHECK (missing IN (0, 1))
+    missing       INTEGER NOT NULL DEFAULT 0 CHECK (missing IN (0, 1)),
+    keep_all      INTEGER NOT NULL DEFAULT 0 CHECK (keep_all IN (0, 1))
 );
 
 CREATE TABLE locations (
@@ -34,6 +35,7 @@ CREATE TABLE versions (
     origin        TEXT    NOT NULL CHECK (origin IN ('initial', 'auto', 'restore')),
     restored_from TEXT    REFERENCES versions(id),
     note          TEXT,
+    keep          INTEGER NOT NULL DEFAULT 0 CHECK (keep IN (0, 1)),
     UNIQUE (item_id, seq),
     UNIQUE (id, item_id)
 );
@@ -76,4 +78,9 @@ CREATE TABLE version_change_counts (
     removed     INTEGER NOT NULL DEFAULT 0,
     changed     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (version_id, unit)
+);
+
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );

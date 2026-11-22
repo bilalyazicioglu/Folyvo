@@ -140,9 +140,9 @@ pub(crate) struct Tracked {
     pub seen: Option<repo::Seen>,
 }
 
-struct Inner {
-    store: Store,
-    cas: Cas,
+pub(crate) struct Inner {
+    pub(crate) store: Store,
+    pub(crate) cas: Cas,
 }
 
 pub struct Engine {
@@ -152,7 +152,7 @@ pub struct Engine {
     inner: Mutex<Inner>,
     /// Canonical keys of items that are tracked and not missing, readable without the writer lock.
     tracked: RwLock<HashSet<String>>,
-    clock: Arc<dyn Clock>,
+    pub(crate) clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     events: broadcast::Sender<EngineEvent>,
 }
@@ -210,11 +210,11 @@ impl Engine {
         Ok(engine)
     }
 
-    fn lock(&self) -> MutexGuard<'_, Inner> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn emit(&self, event: EngineEvent) {
+    pub(crate) fn emit(&self, event: EngineEvent) {
         let _ = self.events.send(event); // no listeners is fine
     }
 

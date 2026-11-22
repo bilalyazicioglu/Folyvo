@@ -6,7 +6,7 @@ use crate::model::{
     ChangeCount, ChangeOutcome, ChangeRecord, ChangeUnit, ContentHash, ItemId, ShareEvent, ShareEventKind,
     Version, VersionId, VersionOrigin,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::MAIN_SEPARATOR_STR;
 
 const VERSION_COLS: &str = "id, item_id, seq, content_hash, size, created_at, origin, restored_from, note";
@@ -581,6 +581,106 @@ pub(crate) fn needing_changes(c: &Connection, item: &ItemId, reader: i64) -> Res
 
 fn bad_text(col: usize, value: &str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(col, Type::Text, format!("unexpected value {value:?}").into())
+}
+
+pub(crate) fn setting(c: &Connection, key: &str) -> Result<Option<String>> {
+    Ok(c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+}
+
+pub(crate) fn set_setting(c: &Connection, key: &str, value: &str) -> Result<()> {
+    c.execute(
+        "INSERT INTO settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn set_keep(c: &Connection, version: &VersionId, keep: bool) -> Result<bool> {
+    Ok(c.execute("UPDATE versions SET keep = ?2 WHERE id = ?1", params![version.as_str(), keep])? > 0)
+}
+
+pub(crate) fn set_keep_all(c: &Connection, item: &ItemId, keep: bool) -> Result<bool> {
+    Ok(c.execute("UPDATE items SET keep_all = ?2 WHERE id = ?1", params![item.as_str(), keep])? > 0)
+}
+
+/// Every save, each file's oldest first, with whether something keeps it whatever its age.
+pub(crate) fn saves_for_letting_go(c: &Connection) -> Result<Vec<(ItemId, crate::letgo::Save)>> {
+    let mut stmt = c.prepare(
+        "SELECT v.item_id, v.id, v.created_at,
+                v.keep = 1 OR i.keep_all = 1 OR (v.note IS NOT NULL AND v.note <> '')
+                OR EXISTS (SELECT 1 FROM share_events s WHERE s.version_id = v.id)
+         FROM versions v JOIN items i ON i.id = v.item_id
+         ORDER BY v.item_id, v.seq",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let item: String = r.get(0)?;
+        let id: String = r.get(1)?;
+        Ok((
+            ItemId::parse(&item).map_err(|e| conv(0, e))?,
+            crate::letgo::Save {
+                id: VersionId::parse(&id).map_err(|e| conv(1, e))?,
+                at: r.get(2)?,
+                protected: r.get(3)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// What `delete_versions` took.
+pub(crate) struct Deleted {
+    pub versions: Vec<VersionId>,
+    /// Stored files no save uses any more, with their sizes.
+    pub unused: Vec<(ContentHash, u64)>,
+}
+
+/// Removes those of `versions` nothing keeps, looked at here and not before: another process may
+/// have marked, noted or sent one since. A save compared with one that goes is compared again;
+/// one restored from it keeps its bytes.
+pub(crate) fn delete_versions(c: &Connection, versions: &[VersionId]) -> Result<Deleted> {
+    let mut hashes = HashSet::new();
+    let mut deleted = Vec::new();
+    for v in versions {
+        let id = v.as_str();
+        let hash: Option<String> = c
+            .query_row(
+                "SELECT v.content_hash FROM versions v JOIN items i ON i.id = v.item_id
+                 WHERE v.id = ?1 AND v.keep = 0 AND i.keep_all = 0 AND (v.note IS NULL OR v.note = '')
+                   AND NOT EXISTS (SELECT 1 FROM share_events s WHERE s.version_id = v.id)",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(hash) = hash else { continue };
+        hashes.insert(hash);
+        deleted.push(v.clone());
+        c.execute(
+            "DELETE FROM version_change_counts WHERE version_id = ?1
+                OR version_id IN (SELECT version_id FROM version_changes WHERE compared_to = ?1)",
+            [id],
+        )?;
+        c.execute("DELETE FROM version_changes WHERE version_id = ?1 OR compared_to = ?1", [id])?;
+        c.execute("UPDATE versions SET restored_from = NULL WHERE restored_from = ?1", [id])?;
+        c.execute("DELETE FROM versions WHERE id = ?1", [id])?;
+    }
+    let mut unused = Vec::new();
+    for hash in hashes {
+        let size: Option<i64> = c
+            .query_row(
+                "DELETE FROM objects WHERE content_hash = ?1
+                 AND NOT EXISTS (SELECT 1 FROM versions WHERE content_hash = ?1) RETURNING size",
+                [&hash],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(size) = size {
+            unused.push((
+                ContentHash::parse(&hash).map_err(|e| CoreError::Corrupt(e.to_string()))?,
+                size as u64,
+            ));
+        }
+    }
+    Ok(Deleted { versions: deleted, unused })
 }
 
 #[cfg(test)]
