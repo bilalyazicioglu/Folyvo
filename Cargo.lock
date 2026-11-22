@@ -1148,7 +1148,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "folyvo-cli"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "dirs",
  "folyvo-core",
@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "folyvo-compare"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "quick-xml",
  "similar",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "folyvo-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "jiff 1.0.2",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "folyvo-desktop"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
  "folyvo-compare",

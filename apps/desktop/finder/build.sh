@@ -18,6 +18,9 @@ trap 'rm -rf "$work"' EXIT
 appex="$work/FolyvoFinderSync.appex"
 mkdir -p "$appex/Contents/MacOS"
 cp "$here/Info.plist" "$appex/Contents/Info.plist"
+# The extension carries the app's version, so the two never tell macOS different ones.
+version="$(plutil -extract version raw -o - "$here/../src-tauri/tauri.conf.json")"
+plutil -replace CFBundleShortVersionString -string "$version" "$appex/Contents/Info.plist"
 swiftc -swift-version 5 -O -application-extension -module-name FolyvoFinderSync -parse-as-library \
   -framework FinderSync -Xlinker -e -Xlinker _NSExtensionMain \
   -o "$appex/Contents/MacOS/FolyvoFinderSync" "$here/FolyvoFinderSync.swift"
