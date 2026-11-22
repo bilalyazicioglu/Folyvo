@@ -195,6 +195,15 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
             >
               Send a Copy…
             </button>
+            <button
+              type="button"
+              className="btn btn--keep"
+              aria-pressed={selected.keep}
+              disabled={act.busy}
+              onClick={() => void act.run(() => api.keepSave(selected.id, !selected.keep))}
+            >
+              Keep This Save
+            </button>
             {!newest && !confirming && (
               <button
                 type="button"
@@ -211,6 +220,17 @@ export function Versions({ itemId, action }: { itemId: string; action?: string |
       </section>
       <aside className="versions__side" aria-label="Saved times">
         <TimeList versions={versions} copies={copies.data ?? []} selected={selected.id} now={now} onSelect={select} />
+        {summary && (
+          <label className="versions__keep-all">
+            <input
+              type="checkbox"
+              checked={summary.keepAll}
+              disabled={act.busy}
+              onChange={(e) => void act.run(() => api.keepEverySave(itemId, e.target.checked))}
+            />
+            Keep every save of this file
+          </label>
+        )}
       </aside>
     </main>
   );

@@ -14,6 +14,7 @@ export function item(over: Partial<ItemSummaryDto> = {}): ItemSummaryDto {
     latestSeq: 1,
     latestAt: Date.now() - 120_000,
     missing: false,
+    keepAll: false,
     ...over,
   };
 }
@@ -30,6 +31,7 @@ export function version(over: Partial<VersionDto> = {}): VersionDto {
     origin: "auto",
     note: null,
     change: null,
+    keep: false,
     ...over,
   };
 }
