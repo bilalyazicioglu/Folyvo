@@ -18,6 +18,12 @@ appex="$out/FolyvoFinderSync.appex"
 plist="$appex/Contents/Info.plist"
 
 if [ -x "$appex/Contents/MacOS/FolyvoFinderSync" ]; then pass "the binary is there"; else fail "the binary is there"; fi
+archs="$(lipo -archs "$appex/Contents/MacOS/FolyvoFinderSync" 2>/dev/null || true)"
+if [[ "$archs" == *arm64* && "$archs" == *x86_64* ]]; then
+  pass "runs on Apple silicon and Intel"
+else
+  fail "runs on Apple silicon and Intel ($archs)"
+fi
 read_key() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist" 2>/dev/null || true; }
 if [ "$(read_key CFBundleIdentifier)" = "dev.folyvo.app.findersync" ]; then pass "bundle id"; else fail "bundle id"; fi
 if [ "$(read_key NSExtension:NSExtensionPointIdentifier)" = "com.apple.FinderSync" ]; then

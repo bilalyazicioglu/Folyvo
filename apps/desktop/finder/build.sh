@@ -21,9 +21,13 @@ cp "$here/Info.plist" "$appex/Contents/Info.plist"
 # The extension carries the app's version, so the two never tell macOS different ones.
 version="$(plutil -extract version raw -o - "$here/../src-tauri/tauri.conf.json")"
 plutil -replace CFBundleShortVersionString -string "$version" "$appex/Contents/Info.plist"
-swiftc -swift-version 5 -O -application-extension -module-name FolyvoFinderSync -parse-as-library \
-  -framework FinderSync -Xlinker -e -Xlinker _NSExtensionMain \
-  -o "$appex/Contents/MacOS/FolyvoFinderSync" "$here/FolyvoFinderSync.swift"
+# One binary for Apple silicon and Intel, as the app is.
+for arch in arm64 x86_64; do
+  swiftc -swift-version 5 -O -application-extension -module-name FolyvoFinderSync -parse-as-library \
+    -target "$arch-apple-macos14.0" -framework FinderSync -Xlinker -e -Xlinker _NSExtensionMain \
+    -o "$work/FolyvoFinderSync-$arch" "$here/FolyvoFinderSync.swift"
+done
+lipo -create -output "$appex/Contents/MacOS/FolyvoFinderSync" "$work/FolyvoFinderSync-arm64" "$work/FolyvoFinderSync-x86_64"
 codesign --force --sign - --entitlements "$here/FolyvoFinderSync.entitlements" "$appex"
 
 mkdir -p "$out"
