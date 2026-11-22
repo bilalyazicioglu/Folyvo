@@ -78,6 +78,10 @@ export const api = {
   /** The rule for older saves, what it would let go now, and what it let go last. */
   lettingGo: () => call<LettingGoDto>("letting_go"),
   setLettingGo: (on: boolean) => call<void>("set_letting_go", { on }),
+  /** A save kept whatever the rule for older saves says, or no longer. */
+  keepSave: (version: string, keep: boolean) => call<void>("keep_save", { version, keep }),
+  /** Every save of a file kept whatever the rule says, or no longer. */
+  keepEverySave: (item: string, keep: boolean) => call<void>("keep_every_save", { item, keep }),
   openSpace: () => call<void>("open_space"),
   folders: () => call<FolderDto[]>("folders"),
   /** How many kept files changed while Folyvo was not running. */

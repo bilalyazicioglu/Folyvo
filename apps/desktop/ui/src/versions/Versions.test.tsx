@@ -45,7 +45,7 @@ test("the picture is an image, never text", async () => {
   const { container } = (backend(), renderWithClient(<Versions itemId="itm_01" />));
   const img = await screen.findByRole("img", { name: `Picture of ${NAME} as it was Today 10:12` });
   expect(img).toHaveAttribute("src", "data:image/png;base64,AAAA");
-  expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
+  expect(container.querySelector("textarea, input:not([type=checkbox]), [contenteditable]")).toBeNull();
 });
 
 test("no picture shows the kind and says so", async () => {
@@ -264,7 +264,7 @@ test("a text file is shown as its own words on a page, never as a field", async 
   const page = await screen.findByRole("img", { name: `Picture of ${NAME} as it was Today 10:12` });
   expect(page).toHaveTextContent("Toplantı notları fiyatlar güncellendi");
   expect(screen.queryByText("No preview for this kind of file.")).not.toBeInTheDocument();
-  expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
+  expect(container.querySelector("textarea, input:not([type=checkbox]), [contenteditable]")).toBeNull();
 });
 
 test("an older copy that would run something is shown in Finder, and the button says so", async () => {
@@ -348,7 +348,7 @@ test("the page can show what changed and go back to the picture", async () => {
   expect(within(page).getByText("18").tagName).toBe("INS");
   expect(within(page).getByText("12").tagName).toBe("DEL");
   expect(within(page).getByText("Footer")).toBeInTheDocument();
-  expect(container.querySelector("textarea, input, [contenteditable]")).toBeNull();
+  expect(container.querySelector("textarea, input:not([type=checkbox]), [contenteditable]")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Show the picture" }));
   expect(await screen.findByRole("img", { name: /Picture of/ })).toBeInTheDocument();
 });
@@ -383,4 +383,45 @@ test("a save with nothing to show says so without a button", async () => {
   renderWithClient(<Versions itemId="itm_01" />);
   await screen.findByRole("img", { name: /Picture of/ });
   expect(screen.queryByRole("button", { name: /Show what changed/ })).toBeNull();
+});
+
+describe("keeping saves", () => {
+  test("Keep This Save marks the save shown, and a second press takes the mark back", async () => {
+    const b = backend();
+    b.state.history.itm_01[1].keep = true;
+    renderWithClient(<Versions itemId="itm_01" />);
+    const keep = await screen.findByRole("button", { name: "Keep This Save" });
+    expect(keep).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(keep);
+    expect(b.called("keep_save")[0].args).toEqual({ version: "ver_03", keep: true });
+
+    await userEvent.click(await option("09:58"));
+    expect(screen.getByRole("button", { name: "Keep This Save" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Keep This Save" }));
+    expect(b.called("keep_save")[1].args).toEqual({ version: "ver_02", keep: false });
+  });
+
+  test("a kept save says so in the list", async () => {
+    const b = backend();
+    b.state.history.itm_01[1].keep = true;
+    renderWithClient(<Versions itemId="itm_01" />);
+    expect(within(await option("09:58")).getByText("Kept")).toBeInTheDocument();
+    expect(within(await option("10:12")).queryByText("Kept")).not.toBeInTheDocument();
+  });
+
+  test("every save of the file can be kept", async () => {
+    const b = backend();
+    renderWithClient(<Versions itemId="itm_01" />);
+    const all = await screen.findByRole("checkbox", { name: "Keep every save of this file" });
+    expect(all).not.toBeChecked();
+    await userEvent.click(all);
+    expect(b.called("keep_every_save")[0].args).toEqual({ item: "itm_01", keep: true });
+  });
+
+  test("a file kept whole shows its switch on", async () => {
+    const b = backend();
+    b.state.recent[0].keepAll = true;
+    renderWithClient(<Versions itemId="itm_01" />);
+    expect(await screen.findByRole("checkbox", { name: "Keep every save of this file" })).toBeChecked();
+  });
 });
