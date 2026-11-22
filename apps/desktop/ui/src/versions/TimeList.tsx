@@ -62,6 +62,7 @@ export function TimeList({ versions, copies, selected, now, onSelect }: Props) {
                 <span className="times__line">
                   <span className="times__time">{clock(v.createdAt, seconds.has(v.createdAt))}</span>
                   {v.note && <em className="times__note">{v.note}</em>}
+                  {v.keep && <span className="chip chip--kept">Kept</span>}
                   {left.map((c) => (
                     <span key={`${c.kind}-${c.at}`} className="chip">
                       {copyLabel(c)}

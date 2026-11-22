@@ -82,6 +82,7 @@ export function demoHandlers() {
     origin: "auto",
     note: null,
     change: null,
+    keep: false,
     ...extra,
   });
   const histories: Record<string, VersionDto[]> = {
@@ -104,7 +105,7 @@ export function demoHandlers() {
   const recentOf = (): ItemSummaryDto[] =>
     Object.keys(histories).map((id) => {
       const h = histories[id];
-      return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false };
+      return { itemId: id, name: names[id], path: `/Users/you/Client work/${names[id]}`, latestSeq: h[0].seq, latestAt: h[0].createdAt, missing: false, keepAll: false };
     });
   const olderFiles = (): ItemSummaryDto[] =>
     [
@@ -121,6 +122,7 @@ export function demoHandlers() {
       latestSeq: 2,
       latestAt: now - (hoursAgo as number) * 60 * MIN,
       missing: missing as boolean,
+      keepAll: false,
     }));
   const byId = (a: Args) => histories[a.item as string] ?? [];
   const copies: CopyDto[] = [
@@ -149,6 +151,10 @@ export function demoHandlers() {
         ? { rule: "unasked", waiting: { saves: 312, bytes: 2_576_980_377 }, last: null }
         : { rule: "on", waiting: { saves: 0, bytes: 0 }, last: { at: now - 2 * 24 * 60 * MIN, saves: 312, bytes: 2_576_980_377 } },
     set_letting_go: (_: Args) => undefined,
+    keep_save: (a: Args) => {
+      for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.keep = a.keep as boolean; });
+    },
+    keep_every_save: (_: Args) => undefined,
     open_space: (_: Args) => undefined,
     suggested_folders: (_: Args) => ["/Users/you/Documents", "/Users/you/Desktop"],
     name_version: (a: Args) => {
