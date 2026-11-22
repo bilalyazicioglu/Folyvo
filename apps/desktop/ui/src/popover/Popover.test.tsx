@@ -512,3 +512,40 @@ describe("older saves", () => {
     expect(b.called("open_space")).toHaveLength(1);
   });
 });
+
+describe("updates", () => {
+  const found = { checks: true, current: "0.0.1", ready: "0.0.2", installing: false, failed: false, needsMove: false };
+
+  test("a newer version is told, and installs only when asked", async () => {
+    const b = backend();
+    b.state.handlers.updates = () => found;
+    renderWithClient(<Popover />);
+    const notice = await screen.findByRole("region", { name: "Folyvo 0.0.2 is ready" });
+    expect(b.called("install_update")).toHaveLength(0);
+    await userEvent.click(within(notice).getByRole("button", { name: "Install and Restart" }));
+    expect(b.called("install_update")).toHaveLength(1);
+  });
+
+  test("while it installs, the button waits", async () => {
+    const b = backend();
+    b.state.handlers.updates = () => ({ ...found, installing: true });
+    renderWithClient(<Popover />);
+    expect(await screen.findByRole("button", { name: "Installing…" })).toBeDisabled();
+  });
+
+  test("an install that failed says so and can be tried again", async () => {
+    const b = backend();
+    b.state.handlers.updates = () => ({ ...found, failed: true });
+    renderWithClient(<Popover />);
+    const notice = await screen.findByRole("region", { name: "Folyvo could not install 0.0.2" });
+    await userEvent.click(within(notice).getByRole("button", { name: "Try Again" }));
+    expect(b.called("install_update")).toHaveLength(1);
+  });
+
+  test("nothing is said while Folyvo is up to date", async () => {
+    backend();
+    renderWithClient(<Popover />);
+    await screen.findAllByRole("button", { name: /Budget_2027/ });
+    expect(screen.queryByRole("region", { name: /is ready/ })).not.toBeInTheDocument();
+  });
+});

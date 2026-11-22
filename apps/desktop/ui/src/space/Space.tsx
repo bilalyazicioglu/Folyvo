@@ -3,7 +3,7 @@ import { api } from "../api";
 import { DocIcon } from "../components/DocIcon";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { sizeLabel } from "../files";
-import { useAction, useLettingGo, useSpace } from "../queries";
+import { useAction, useLettingGo, useSpace, useUpdates } from "../queries";
 
 /** How many files the window lists. */
 const TOP = 10;
@@ -17,6 +17,7 @@ function lastLetGo(at: number, saves: number, bytes: number): string {
 export function Space() {
   const space = useSpace(TOP);
   const letting = useLettingGo();
+  const updates = useUpdates();
   const act = useAction();
   const top = useId();
   const older = useId();
@@ -71,6 +72,25 @@ export function Space() {
           )}
           {rule === "unasked" && <p className="space__hint">Folyvo asks before it first lets a save go.</p>}
           {last && <p className="space__hint">{lastLetGo(last.at, last.saves, last.bytes)}</p>}
+
+          {updates.data && (
+            <>
+              <h2>Updates</h2>
+              <label className="space__toggle">
+                <input
+                  type="checkbox"
+                  checked={updates.data.checks}
+                  disabled={act.busy}
+                  onChange={(e) => void act.run(() => api.setUpdateChecks(e.target.checked))}
+                />
+                Check for updates once a day
+              </label>
+              <p className="space__hint">
+                Folyvo asks GitHub for the latest version and sends nothing else. This is Folyvo {updates.data.current}.
+              </p>
+              {updates.data.needsMove && <p className="space__hint">Move Folyvo to Applications to get updates.</p>}
+            </>
+          )}
         </div>
       )}
     </main>

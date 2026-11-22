@@ -13,6 +13,7 @@ import type { MarkedPageDto } from "./generated/MarkedPageDto";
 import type { FolderDto } from "./generated/FolderDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
 import type { LettingGoDto } from "./generated/LettingGoDto";
+import type { UpdatesDto } from "./generated/UpdatesDto";
 import type { SpaceDto } from "./generated/SpaceDto";
 import type { RestoreDto } from "./generated/RestoreDto";
 import type { UserError } from "./generated/UserError";
@@ -83,6 +84,11 @@ export const api = {
   /** Every save of a file kept whatever the rule says, or no longer. */
   keepEverySave: (item: string, keep: boolean) => call<void>("keep_every_save", { item, keep }),
   openSpace: () => call<void>("open_space"),
+  /** Whether Folyvo looks for a newer version once a day, and the one it found. */
+  updates: () => call<UpdatesDto>("updates"),
+  setUpdateChecks: (on: boolean) => call<void>("set_update_checks", { on }),
+  /** Installs the version found; Folyvo opens again on its own. */
+  installUpdate: () => call<void>("install_update"),
   folders: () => call<FolderDto[]>("folders"),
   /** How many kept files changed while Folyvo was not running. */
   missedWhileClosed: () => call<number>("missed_while_closed"),

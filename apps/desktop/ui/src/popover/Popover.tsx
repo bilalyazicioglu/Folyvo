@@ -3,7 +3,7 @@ import { api, AppError, INTERNAL_ERROR } from "../api";
 import { NoFolders, ReadingFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
-import { useAction, useActivity, useFolders, useLettingGo, useMissed, useNow, useRecent, useSpace } from "../queries";
+import { useAction, useActivity, useFolders, useLettingGo, useMissed, useNow, useRecent, useSpace, useUpdates } from "../queries";
 import { folderName, sizeLabel } from "../files";
 import type { FolderDto } from "../generated/FolderDto";
 import { dayBounds, hourBuckets } from "../time";
@@ -12,6 +12,7 @@ import { FileRow } from "./FileRow";
 import { LetGoQuestion } from "./LetGoQuestion";
 import { MissedNotice } from "./MissedNotice";
 import { TodayStrip } from "./TodayStrip";
+import { UpdateNotice } from "./UpdateNotice";
 
 const ROWS = 8;
 
@@ -65,6 +66,7 @@ export function Popover() {
   const activity = useActivity(from, to);
   const missed = useMissed();
   const letting = useLettingGo();
+  const updates = useUpdates();
   const space = useSpace(0);
   const act = useAction();
   const observer = useRef<ResizeObserver | null>(null);
@@ -147,6 +149,9 @@ export function Popover() {
           busy={act.busy}
           onAnswer={(on) => void act.run(() => api.setLettingGo(on))}
         />
+      )}
+      {updates.data && (
+        <UpdateNotice updates={updates.data} busy={act.busy} onInstall={() => void act.run(() => api.installUpdate())} />
       )}
       {dropped && (
         <DropResult

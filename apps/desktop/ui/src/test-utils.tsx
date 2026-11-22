@@ -77,6 +77,8 @@ export function mockBackend(over: Partial<Backend> = {}) {
           return { bytes: 0, files: [] };
         case "letting_go":
           return { rule: "unasked", waiting: { saves: 0, bytes: 0 }, last: null };
+        case "updates":
+          return { checks: true, current: "0.0.1", ready: null, installing: false, failed: false, needsMove: false };
         case "plugin:dialog|open":
           return state.picked;
         default:
