@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use chrono::{Local, TimeZone};
 use folyvo_core::ingest::IngestOutcome;
 use folyvo_core::model::VersionId;
 use folyvo_core::ports::{RandomIdGen, SystemClock};
@@ -43,10 +42,8 @@ fn old_vault_hint() -> Option<String> {
 
 /// Local time, minute precision.
 fn when(ms: i64) -> String {
-    Local
-        .timestamp_millis_opt(ms)
-        .single()
-        .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+    jiff::Timestamp::from_millisecond(ms)
+        .map(|t| t.to_zoned_datetime(jiff::tz::TimeZone::system()).strftime("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
 }
 
@@ -127,5 +124,22 @@ fn main() -> ExitCode {
             eprintln!("{message}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::when;
+
+    #[test]
+    fn a_time_is_written_to_the_minute() {
+        let text = when(1_700_000_000_000);
+        let shape: String = text.chars().map(|c| if c.is_ascii_digit() { '0' } else { c }).collect();
+        assert_eq!(shape, "0000-00-00 00:00", "{text}");
+    }
+
+    #[test]
+    fn a_time_out_of_range_is_left_blank() {
+        assert_eq!(when(i64::MAX), "");
     }
 }
