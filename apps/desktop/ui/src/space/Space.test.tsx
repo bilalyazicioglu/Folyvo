@@ -69,3 +69,23 @@ test("with nothing kept yet, says so", async () => {
   await waitFor(() => expect(screen.getByRole("heading", { name: "Folyvo uses 0 B on this Mac" })).toBeInTheDocument());
   expect(screen.getByText("Nothing takes room yet.")).toBeInTheDocument();
 });
+
+test("looking for updates can be turned off, and says what it sends", async () => {
+  const b = backend();
+  renderWithClient(<Space />);
+  const box = await screen.findByRole("checkbox", { name: "Check for updates once a day" });
+  expect(box).toBeChecked();
+  expect(screen.getByText(/asks GitHub for the latest version and sends nothing else/)).toBeInTheDocument();
+  expect(screen.getByText(/This is Folyvo 0\.0\.1\./)).toBeInTheDocument();
+  await userEvent.click(box);
+  expect(b.called("set_update_checks")[0].args).toEqual({ on: false });
+});
+
+test("says to move Folyvo where it cannot update itself", async () => {
+  const b = backend();
+  b.state.handlers.updates = () => ({
+    checks: true, current: "0.0.1", ready: null, installing: false, failed: false, needsMove: true,
+  });
+  renderWithClient(<Space />);
+  expect(await screen.findByText("Move Folyvo to Applications to get updates.")).toBeInTheDocument();
+});

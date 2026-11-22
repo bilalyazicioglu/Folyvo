@@ -151,6 +151,17 @@ export function demoHandlers() {
         ? { rule: "unasked", waiting: { saves: 312, bytes: 2_576_980_377 }, last: null }
         : { rule: "on", waiting: { saves: 0, bytes: 0 }, last: { at: now - 2 * 24 * 60 * MIN, saves: 312, bytes: 2_576_980_377 } },
     set_letting_go: (_: Args) => undefined,
+    // `&update=1` shows a newer version waiting to be installed.
+    updates: (_: Args) => ({
+      checks: true,
+      current: "0.0.1",
+      ready: new URLSearchParams(window.location.search).get("update") === "1" ? "0.0.2" : null,
+      installing: false,
+      failed: false,
+      needsMove: false,
+    }),
+    set_update_checks: (_: Args) => undefined,
+    install_update: (_: Args) => undefined,
     keep_save: (a: Args) => {
       for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.keep = a.keep as boolean; });
     },
