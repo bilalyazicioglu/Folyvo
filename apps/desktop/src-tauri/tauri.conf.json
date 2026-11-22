@@ -32,7 +32,8 @@
       "files": {
         "PlugIns/FolyvoFinderSync.appex": "../finder/build/FolyvoFinderSync.appex"
       },
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "minimumSystemVersion": "14.0"
     }
   },
   "plugins": {
