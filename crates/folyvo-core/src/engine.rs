@@ -356,6 +356,15 @@ impl Engine {
         Ok(())
     }
 
+    /// A choice the app keeps in the vault, such as whether it looks for updates.
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        repo::setting(self.lock().store.conn(), key)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        repo::set_setting(self.lock().store.conn(), key, value)
+    }
+
     pub fn roots(&self) -> Result<Vec<PathBuf>> {
         let g = self.lock();
         Ok(repo::list_roots(g.store.conn())?.into_iter().map(PathBuf::from).collect())
@@ -698,6 +707,18 @@ mod tests {
         engine: Engine,
         clock: Arc<FakeClock>,
         rx: Receiver<EngineEvent>,
+    }
+
+    #[test]
+    fn a_setting_is_kept_across_opening_the_vault_again() {
+        let t = setup();
+        assert_eq!(t.engine.setting("update_checks").unwrap(), None);
+        t.engine.set_setting("update_checks", "off").unwrap();
+        t.engine.set_setting("update_checks", "on").unwrap();
+        drop(t.engine);
+        let again =
+            Engine::open(&t.dir.path().join("vault"), t.clock.clone(), Arc::new(SeqIdGen::new())).unwrap();
+        assert_eq!(again.setting("update_checks").unwrap().as_deref(), Some("on"));
     }
 
     fn setup() -> T {
