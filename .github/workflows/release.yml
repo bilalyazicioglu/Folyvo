@@ -1,0 +1,68 @@
+name: Release
+
+# For a version tag: builds Folyvo for Apple silicon and Intel in one app, signs the update archive
+# with the updater key, and leaves a draft release to look over. Nothing reaches anyone, the app's
+# own update check included, until the draft is published.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag is the app's version
+        run: |
+          version="$(plutil -extract version raw -o - apps/desktop/src-tauri/tauri.conf.json)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but tauri.conf.json says $version"
+            exit 1
+          fi
+          test -f "docs/releases/$version.md" || { echo "::error::no docs/releases/$version.md"; exit 1; }
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+      - uses: ./.github/actions/setup-rust
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/ui/package-lock.json
+      - run: npm --prefix apps/desktop/ui ci
+      - run: cargo install tauri-cli --version "^2.12" --locked
+      - name: Build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd apps/desktop/src-tauri
+          cargo tauri build --target universal-apple-darwin --bundles app,dmg \
+            --config '{"bundle":{"createUpdaterArtifacts":true}}' 2>&1 | tee "$RUNNER_TEMP/build.log"
+          # Tauri only warns when the secret key is not the pair of the public key in the app, and
+          # every copy of Folyvo would then refuse this update. Stop instead.
+          if grep -q "does not match the public key" "$RUNNER_TEMP/build.log"; then
+            echo "::error::the updater secret key is not the pair of plugins.updater.pubkey"
+            exit 1
+          fi
+      - name: Gather the release files
+        run: |
+          bash scripts/gather-release.sh "$VERSION" \
+            target/universal-apple-darwin/release/bundle dist "$GITHUB_REPOSITORY"
+      - name: Leave a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Folyvo $VERSION (pre-beta)" \
+            --notes-file "docs/releases/$VERSION.md" \
+            dist/*
