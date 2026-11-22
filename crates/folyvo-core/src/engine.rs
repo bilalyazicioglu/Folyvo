@@ -78,6 +78,8 @@ pub struct ItemSummary {
     pub latest_seq: i64,
     pub latest_at: i64,
     pub missing: bool,
+    /// Every save of this file is kept whatever the rule for older saves says.
+    pub keep_all: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +95,8 @@ pub struct VersionView {
     pub code: String,
     /// What changed since the save before, once it has been worked out.
     pub change: Option<ChangeRecord>,
+    /// Marked to keep whatever the rule for older saves says.
+    pub keep: bool,
 }
 
 /// One save: a version of an item and when it was made.
@@ -114,12 +118,14 @@ pub struct VaultStats {
 pub(crate) fn version_views(c: &rusqlite::Connection, item: &ItemId) -> Result<Vec<VersionView>> {
     let versions = repo::versions_newest_first(c, item)?;
     let mut changes = repo::changes_for_item(c, item)?;
+    let kept = repo::kept_versions(c, item)?;
     let codes = version_codes(&versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>());
     Ok(versions
         .into_iter()
         .zip(codes)
         .map(|(v, code)| VersionView {
             change: changes.remove(&v.id),
+            keep: kept.contains(&v.id),
             code,
             id: v.id,
             seq: v.seq,
@@ -496,6 +502,7 @@ impl Engine {
             latest_seq: latest.seq,
             latest_at: latest.created_at,
             missing,
+            keep_all: repo::keeps_all(c, item)?,
         })
     }
 

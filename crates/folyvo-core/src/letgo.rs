@@ -503,6 +503,19 @@ mod engine_tests {
     }
 
     #[test]
+    fn a_marked_save_and_a_file_kept_whole_show_as_such() {
+        let t = setup();
+        let saves = t.month_old("a.docx");
+        t.engine.keep_save(&saves[1].id, true).unwrap();
+        t.engine.keep_every_save(&saves[1].item_id, true).unwrap();
+        let kept: Vec<bool> = t.engine.history(&saves[1].item_id).unwrap().iter().map(|v| v.keep).collect();
+        assert_eq!(kept, vec![false, false, true, false], "newest first");
+        assert!(t.engine.item(&saves[1].item_id).unwrap().keep_all);
+        t.engine.keep_every_save(&saves[1].item_id, false).unwrap();
+        assert!(!t.engine.item(&saves[1].item_id).unwrap().keep_all);
+    }
+
+    #[test]
     fn the_rule_is_remembered() {
         let t = setup();
         t.engine.set_letting_go(true).unwrap();

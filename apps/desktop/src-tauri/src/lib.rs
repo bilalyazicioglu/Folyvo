@@ -101,6 +101,8 @@ pub fn run() {
             commands::space,
             commands::letting_go,
             commands::set_letting_go,
+            commands::keep_save,
+            commands::keep_every_save,
             commands::suggested_folders,
             commands::finish_first_window,
             commands::hide_popover,
