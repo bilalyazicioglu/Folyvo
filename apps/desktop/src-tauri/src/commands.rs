@@ -266,6 +266,18 @@ pub async fn letting_go(rt: Rt<'_>) -> Result<LettingGoDto, UserError> {
 }
 
 #[tauri::command]
+pub async fn keep_save(rt: Rt<'_>, version: String, keep: bool) -> Result<(), UserError> {
+    let api = rt.api();
+    blocking(move || api.keep_save(&version, keep)).await
+}
+
+#[tauri::command]
+pub async fn keep_every_save(rt: Rt<'_>, item: String, keep: bool) -> Result<(), UserError> {
+    let api = rt.api();
+    blocking(move || api.keep_every_save(&item, keep)).await
+}
+
+#[tauri::command]
 pub async fn set_letting_go(rt: Rt<'_>, on: bool) -> Result<(), UserError> {
     let runtime = rt.inner().clone();
     blocking(move || runtime.set_letting_go(on)).await

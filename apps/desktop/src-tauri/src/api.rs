@@ -175,6 +175,14 @@ impl AppApi {
         })
     }
 
+    pub fn keep_save(&self, version: &str, keep: bool) -> Result<(), UserError> {
+        Ok(self.engine.keep_save(&VersionId::parse(version)?, keep)?)
+    }
+
+    pub fn keep_every_save(&self, item: &str, keep: bool) -> Result<(), UserError> {
+        Ok(self.engine.keep_every_save(&ItemId::parse(item)?, keep)?)
+    }
+
     pub fn set_letting_go(&self, on: bool) -> Result<(), UserError> {
         Ok(self.engine.set_letting_go(on)?)
     }
@@ -187,6 +195,23 @@ mod tests {
     use folyvo_core::ports::{FakeClock, SeqIdGen};
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_save_and_a_whole_file_can_be_marked_to_keep() {
+        let r = rig();
+        r.save("a.docx", b"one");
+        r.save("a.docx", b"two");
+        let item = r.item();
+        let older = r.api.history(&item).unwrap()[1].id.clone();
+        r.api.keep_save(&older, true).unwrap();
+        assert_eq!(
+            r.api.history(&item).unwrap().iter().map(|v| v.keep).collect::<Vec<_>>(),
+            vec![false, true]
+        );
+        r.api.keep_every_save(&item, true).unwrap();
+        assert!(r.api.item(&item).unwrap().keep_all);
+        assert!(r.api.keep_save("ver_nope", true).is_err());
+    }
 
     #[test]
     fn the_rule_for_older_saves_starts_unasked_with_what_it_would_let_go() {

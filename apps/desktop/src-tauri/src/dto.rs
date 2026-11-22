@@ -41,6 +41,8 @@ pub struct ItemSummaryDto {
     #[ts(type = "number")]
     pub latest_at: i64,
     pub missing: bool,
+    /// Every save of this file is kept whatever the rule for older saves says.
+    pub keep_all: bool,
 }
 
 impl From<ItemSummary> for ItemSummaryDto {
@@ -52,6 +54,7 @@ impl From<ItemSummary> for ItemSummaryDto {
             latest_seq: s.latest_seq,
             latest_at: s.latest_at,
             missing: s.missing,
+            keep_all: s.keep_all,
         }
     }
 }
@@ -73,6 +76,8 @@ pub struct VersionDto {
     pub code: String,
     /// What changed since the save before; none until it has been worked out.
     pub change: Option<ChangeDto>,
+    /// Marked to keep whatever the rule for older saves says.
+    pub keep: bool,
 }
 
 /// What changed in a save, as counts the UI turns into words ("3 cells changed").
@@ -160,6 +165,7 @@ impl From<VersionView> for VersionDto {
             note: v.note,
             code: v.code,
             change: v.change.map(ChangeDto::from),
+            keep: v.keep,
         }
     }
 }
@@ -733,6 +739,7 @@ mod tests {
             created_at: 1_700_000_000_000,
             size: 2048,
             content_hash: ContentHash::of_bytes(b"x"),
+            keep: false,
             origin: VersionOrigin::Restore,
             note: Some("Sent to Acme".into()),
             code: "0a".into(),
@@ -803,6 +810,7 @@ mod tests {
             note: None,
             code: "0a".into(),
             change,
+            keep: false,
         };
         let same =
             ChangeRecord { compared_to: None, outcome: ChangeOutcome::SameText, counts: vec![], reader: 1 };
