@@ -33,7 +33,7 @@ has "security policy has the alias" SECURITY.md "security@bilalyazicioglu.com"
 has "support points to discussions" SUPPORT.md "https://github.com/bilalyazicioglu/Folyvo/discussions"
 
 has "readme states the licence" README.md "GPL-3.0-or-later"
-has "readme is honest about the status" README.md "under development"
+has "readme says what stage Folyvo is at" README.md "in pre-beta"
 has "readme links the contribution guide" README.md "CONTRIBUTING.md"
 
 exists .github/ISSUE_TEMPLATE/bug.yml
