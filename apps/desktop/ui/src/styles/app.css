@@ -50,8 +50,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .today__title p { margin: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .today__bars { display: flex; align-items: flex-end; gap: 4px; height: 56px; margin-top: 10px; }
 .today__hour { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; }
-.today__bar { display: block; min-height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 50%, transparent); }
-.today__hour.is-most .today__bar { background: var(--accent); }
+.today__bar { display: block; min-height: 3px; border-radius: 3px; background: var(--chart-soft); }
+.today__hour.is-most .today__bar { background: var(--chart); }
 .today__hour.is-empty .today__bar { background: var(--faint); }
 .today__label { height: 12px; overflow: visible; white-space: nowrap; color: var(--muted); font-size: 10.5px; line-height: 12px; font-variant-numeric: tabular-nums; }
 
@@ -212,7 +212,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
   box-shadow: inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--soft-line), 0 8px 24px rgb(0 0 0 / 0.1); }
 .versions__pill .btn--primary { padding: 0 20px; }
 .versions__pill .btn { white-space: nowrap; }
-.btn--keep[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.btn--keep[aria-pressed="true"] { background: var(--keep-soft); color: var(--keep-text); }
 .versions .confirm { position: absolute; z-index: 3; left: 50%; bottom: 84px; width: min(440px, calc(100% - 48px)); transform: translateX(-50%); margin: 0; padding: 14px 16px; border: 0; border-radius: 18px; background: var(--surface); box-shadow: 0 0 0 0.5px var(--soft-line), 0 16px 40px rgb(0 0 0 / 0.18); }
 .confirm__actions { display: flex; gap: 8px; }
 
@@ -234,7 +234,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 .times__row[aria-selected="true"] .times__what { color: var(--accent-ink); opacity: 0.8; }
 .times__note { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-style: normal; opacity: 0.75; }
 .chip { flex: 0 0 auto; margin-left: auto; padding: 2px 8px; white-space: nowrap; border-radius: 9px; font-size: 11.5px; font-weight: 500; background: var(--accent-soft); color: var(--accent-text); }
-.chip--kept { background: var(--field); color: var(--ink); }
+.chip--kept { background: var(--keep-soft); color: var(--keep-text); }
 .chip--kept + .chip { margin-left: 4px; }
 .versions__keep-all { display: flex; align-items: center; gap: 8px; margin: 16px 8px 0; color: var(--muted); font-size: 12px; }
 .times__row[aria-selected="true"] .chip { background: rgb(255 255 255 / 0.22); color: var(--accent-ink); }
