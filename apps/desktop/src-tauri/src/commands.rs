@@ -283,6 +283,36 @@ pub async fn set_letting_go(rt: Rt<'_>, on: bool) -> Result<(), UserError> {
     blocking(move || runtime.set_letting_go(on)).await
 }
 
+type Up<'a> = State<'a, Arc<crate::updates::Updates>>;
+
+#[tauri::command]
+pub async fn updates(up: Up<'_>) -> Result<crate::dto::UpdatesDto, UserError> {
+    let up = up.inner().clone();
+    blocking(move || up.status()).await
+}
+
+/// Turned on, Folyvo looks for a newer version right away if a day has passed.
+#[tauri::command]
+pub async fn set_update_checks(up: Up<'_>, on: bool) -> Result<(), UserError> {
+    let up = up.inner().clone();
+    blocking(move || {
+        up.set_checks(on)?;
+        if on {
+            std::thread::spawn(move || up.check_if_due());
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Installs the version found and opens Folyvo again.
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle, up: Up<'_>) -> Result<(), UserError> {
+    let up = up.inner().clone();
+    blocking(move || up.install()).await?;
+    app.restart()
+}
+
 /// The popover asks for the height of its content; the window follows within limits.
 #[tauri::command]
 pub fn fit_popover(app: AppHandle, height: f64) {

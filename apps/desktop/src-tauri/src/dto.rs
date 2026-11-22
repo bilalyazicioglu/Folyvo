@@ -222,6 +222,24 @@ impl From<LastLetGo> for LastLetGoDto {
     }
 }
 
+/// Updates from inside the app: whether Folyvo looks for them, and the one found.
+#[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdatesDto {
+    /// Looks for a newer version once a day.
+    pub checks: bool,
+    /// The version running now.
+    pub current: String,
+    /// A newer version found and not yet installed.
+    pub ready: Option<String>,
+    pub installing: bool,
+    /// The last install of `ready` did not finish; it can be tried again.
+    pub failed: bool,
+    /// Folyvo runs from where it cannot replace itself, such as Downloads or the disk image.
+    pub needs_move: bool,
+}
+
 /// The rule for older saves, what it would let go now, and what it let go last.
 #[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -345,6 +363,8 @@ pub enum EngineEventDto {
     },
     /// The event channel lagged: everything the UI shows may be stale.
     Resync,
+    /// A newer Folyvo was found, or its install began, failed or the checks were turned on or off.
+    UpdateChanged,
 }
 
 impl From<EngineEvent> for EngineEventDto {

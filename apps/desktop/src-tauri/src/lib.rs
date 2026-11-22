@@ -16,6 +16,7 @@ pub mod services;
 pub mod share;
 pub mod toggle;
 pub mod tray;
+pub mod updates;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -72,6 +73,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::recent,
             commands::item,
@@ -112,6 +114,9 @@ pub fn run() {
             commands::reveal,
             commands::take_which,
             commands::send_copy,
+            commands::updates,
+            commands::set_update_checks,
+            commands::install_update,
         ])
         .manage(tray::PendingWhich::default())
         .manage(intent::PendingIntent::default())
@@ -126,9 +131,19 @@ pub fn run() {
                 Arc::new(SystemClock),
                 Arc::new(RandomIdGen),
                 DEFAULT_QUIET,
-                notifier,
+                notifier.clone(),
             )
             .map_err(|e| e.to_string())?;
+            let updates = Arc::new(updates::Updates::new(
+                runtime.engine(),
+                Arc::new(SystemClock),
+                Box::new(updates::TauriReleases(app.handle().clone())),
+                updates::Placement::of(&std::env::current_exe()?),
+                notifier,
+                &app.package_info().version.to_string(),
+            ));
+            updates::look_in_background(updates.clone());
+            app.manage(updates);
             app.manage(runtime);
             tray::build(app)?;
             #[cfg(target_os = "macos")]
