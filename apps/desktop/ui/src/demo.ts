@@ -135,6 +135,21 @@ export function demoHandlers() {
     stats: (_: Args) => ({ items: 3, versions: 17, bytes: 21_400_000 }),
     folders: (_: Args) => [{ path: "/Users/you/Client work", problem: null, reading: null }],
     missed_while_closed: (_: Args) => 0,
+    // `&ask=1` shows the question about older saves.
+    space: (_: Args) => ({
+      bytes: 1_288_490_188,
+      files: [
+        { itemId: "itm_demo1", name: names.itm_demo1, saves: 42, bytes: 639_631_360 },
+        { itemId: "itm_demo2", name: names.itm_demo2, saves: 18, bytes: 251_658_240 },
+        { itemId: "itm_demo3", name: names.itm_demo3, saves: 96, bytes: 92_274_688 },
+      ],
+    }),
+    letting_go: (_: Args) =>
+      new URLSearchParams(window.location.search).get("ask") === "1"
+        ? { rule: "unasked", waiting: { saves: 312, bytes: 2_576_980_377 }, last: null }
+        : { rule: "on", waiting: { saves: 0, bytes: 0 }, last: { at: now - 2 * 24 * 60 * MIN, saves: 312, bytes: 2_576_980_377 } },
+    set_letting_go: (_: Args) => undefined,
+    open_space: (_: Args) => undefined,
     suggested_folders: (_: Args) => ["/Users/you/Documents", "/Users/you/Desktop"],
     name_version: (a: Args) => {
       for (const h of Object.values(histories)) h.forEach((x) => { if (x.id === a.version) x.note = (a.note as string | null) ?? null; });

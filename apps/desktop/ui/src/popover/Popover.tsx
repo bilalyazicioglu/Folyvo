@@ -3,26 +3,29 @@ import { api, AppError, INTERNAL_ERROR } from "../api";
 import { NoFolders, ReadingFolders, WaitingForSave } from "../components/EmptyState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { FolderList } from "../components/FolderList";
-import { useAction, useActivity, useFolders, useMissed, useNow, useRecent } from "../queries";
-import { folderName } from "../files";
+import { useAction, useActivity, useFolders, useLettingGo, useMissed, useNow, useRecent, useSpace } from "../queries";
+import { folderName, sizeLabel } from "../files";
 import type { FolderDto } from "../generated/FolderDto";
 import { dayBounds, hourBuckets } from "../time";
 import { DropResult, type Dropped } from "./DropResult";
 import { FileRow } from "./FileRow";
+import { LetGoQuestion } from "./LetGoQuestion";
 import { MissedNotice } from "./MissedNotice";
 import { TodayStrip } from "./TodayStrip";
 
 const ROWS = 8;
 
-function keeping(folders: FolderDto[]): string {
+/** `lettingGo`: older saves are let go, so not every save is kept. */
+function keeping(folders: FolderDto[], lettingGo: boolean): string {
   const reading = folders.filter((f) => f.reading);
   if (reading.length > 0 && reading.every((f) => f.reading?.state === "paused"))
     return reading.length === 1 ? `Paused reading ${folderName(reading[0].path)}` : `Paused reading ${reading.length} folders`;
   if (reading.length === 1) return `Reading ${folderName(reading[0].path)}…`;
   if (reading.length > 1) return `Reading ${reading.length} folders…`;
+  const what = lettingGo ? "saves" : "every save";
   return folders.length === 1
-    ? `Keeping every save in ${folderName(folders[0].path)}`
-    : `Keeping every save in ${folders.length} folders`;
+    ? `Keeping ${what} in ${folderName(folders[0].path)}`
+    : `Keeping ${what} in ${folders.length} folders`;
 }
 
 /** A failed lookup: a folder is refused plainly, anything else shows its error. */
@@ -61,6 +64,8 @@ export function Popover() {
   const recent = useRecent();
   const activity = useActivity(from, to);
   const missed = useMissed();
+  const letting = useLettingGo();
+  const space = useSpace(0);
   const act = useAction();
   const observer = useRef<ResizeObserver | null>(null);
   // A callback ref: the loading shell and the loaded popover are different elements, and both must be watched.
@@ -136,6 +141,13 @@ export function Popover() {
       {!!missed.data && (
         <MissedNotice count={missed.data} onDismiss={() => void act.run(() => api.dismissMissed())} />
       )}
+      {letting.data?.rule === "unasked" && letting.data.waiting.saves > 0 && (
+        <LetGoQuestion
+          bytes={letting.data.waiting.bytes}
+          busy={act.busy}
+          onAnswer={(on) => void act.run(() => api.setLettingGo(on))}
+        />
+      )}
       {dropped && (
         <DropResult
           result={dropped}
@@ -182,13 +194,18 @@ export function Popover() {
               All Files…
             </button>
           )}
+          {folderList.length > 0 && space.data && (
+            <button type="button" className="btn btn--link popover__space" onClick={() => void api.openSpace()}>
+              Uses {sizeLabel(space.data.bytes)}
+            </button>
+          )}
           <button type="button" className="btn btn--link popover__quit" onClick={() => void api.quit()}>
             Quit Folyvo
           </button>
         </div>
         {folderList.length > 0 && (
           <div className="popover__keeping">
-            <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} summary={keeping(folderList)} />
+            <FolderList folders={folderList} onRemove={removeFolder} busy={act.busy} summary={keeping(folderList, letting.data?.rule === "on")} />
             <button type="button" className="btn btn--link" disabled={act.busy} onClick={() => void addFolder()}>
               Add Folder…
             </button>

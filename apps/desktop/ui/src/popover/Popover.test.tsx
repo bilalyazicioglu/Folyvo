@@ -311,6 +311,13 @@ test("the footer says where saves are kept", async () => {
   expect(screen.getByRole("button", { name: "Add Folder…" })).toBeInTheDocument();
 });
 
+test("once older saves are let go, the footer no longer says every save is kept", async () => {
+  const b = backend();
+  b.state.handlers.letting_go = () => ({ rule: "on", waiting: { saves: 0, bytes: 0 }, last: null });
+  renderWithClient(<Popover />);
+  expect(await screen.findByText("Keeping saves in Client work")).toBeInTheDocument();
+});
+
 test("the first launch still invites a folder, and an empty folder still waits", async () => {
   mockBackend({ folders: [], recent: [] });
   const { unmount } = renderWithClient(<Popover />);
@@ -467,4 +474,41 @@ test("a read with no kept files beside it has the popover to itself", async () =
   renderWithClient(<Popover />);
   expect(await screen.findByText(/Your files show up here/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "All Files…" })).not.toBeInTheDocument();
+});
+
+describe("older saves", () => {
+  const waiting = { rule: "unasked", waiting: { saves: 312, bytes: 2.4 * 1024 ** 3 }, last: null };
+
+  test("asks once before letting any go, and an OK turns the rule on", async () => {
+    const b = backend();
+    b.state.handlers.letting_go = () => waiting;
+    renderWithClient(<Popover />);
+    const question = await screen.findByRole("region", { name: "Folyvo will start letting go of older saves" });
+    expect(within(question).getByText(/This frees up to 2\.4 GB\./)).toBeInTheDocument();
+    await userEvent.click(within(question).getByRole("button", { name: "OK" }));
+    expect(b.called("set_letting_go")[0].args).toEqual({ on: true });
+  });
+
+  test("Keep Every Save turns the rule off", async () => {
+    const b = backend();
+    b.state.handlers.letting_go = () => waiting;
+    renderWithClient(<Popover />);
+    await userEvent.click(await screen.findByRole("button", { name: "Keep Every Save" }));
+    expect(b.called("set_letting_go")[0].args).toEqual({ on: false });
+  });
+
+  test("is not asked while nothing would go", async () => {
+    backend();
+    renderWithClient(<Popover />);
+    await screen.findAllByRole("button", { name: /Budget_2027/ });
+    expect(screen.queryByRole("region", { name: /letting go/ })).not.toBeInTheDocument();
+  });
+
+  test("the room taken opens the Space window", async () => {
+    const b = backend();
+    b.state.handlers.space = () => ({ bytes: 1.2 * 1024 ** 3, files: [] });
+    renderWithClient(<Popover />);
+    await userEvent.click(await screen.findByRole("button", { name: "Uses 1.2 GB" }));
+    expect(b.called("open_space")).toHaveLength(1);
+  });
 });
