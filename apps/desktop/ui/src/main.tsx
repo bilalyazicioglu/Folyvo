@@ -4,6 +4,7 @@ import { startEventBridge } from "./events";
 import { AllFiles } from "./files/AllFiles";
 import { FirstWindow } from "./first/FirstWindow";
 import { Popover } from "./popover/Popover";
+import { Space } from "./space/Space";
 import "./styles/app.css";
 import { Versions } from "./versions/Versions";
 
@@ -23,6 +24,8 @@ async function start() {
         <AllFiles />
       ) : params.get("view") === "first" ? (
         <FirstWindow />
+      ) : params.get("view") === "space" ? (
+        <Space />
       ) : (
         <Popover />
       )}

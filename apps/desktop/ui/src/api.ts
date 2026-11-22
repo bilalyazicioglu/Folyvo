@@ -12,6 +12,8 @@ import type { PreviewDto } from "./generated/PreviewDto";
 import type { MarkedPageDto } from "./generated/MarkedPageDto";
 import type { FolderDto } from "./generated/FolderDto";
 import type { ItemSummaryDto } from "./generated/ItemSummaryDto";
+import type { LettingGoDto } from "./generated/LettingGoDto";
+import type { SpaceDto } from "./generated/SpaceDto";
 import type { RestoreDto } from "./generated/RestoreDto";
 import type { UserError } from "./generated/UserError";
 import type { VaultStatsDto } from "./generated/VaultStatsDto";
@@ -71,6 +73,12 @@ export const api = {
     call<void>("open_version", { item, version, newest }),
   restore: (item: string, version: string) => call<RestoreDto>("restore", { item, version }),
   stats: () => call<VaultStatsDto>("stats"),
+  /** The room Folyvo takes on this Mac, with the `top` files that take the most. */
+  space: (top: number) => call<SpaceDto>("space", { top }),
+  /** The rule for older saves, what it would let go now, and what it let go last. */
+  lettingGo: () => call<LettingGoDto>("letting_go"),
+  setLettingGo: (on: boolean) => call<void>("set_letting_go", { on }),
+  openSpace: () => call<void>("open_space"),
   folders: () => call<FolderDto[]>("folders"),
   /** How many kept files changed while Folyvo was not running. */
   missedWhileClosed: () => call<number>("missed_while_closed"),
