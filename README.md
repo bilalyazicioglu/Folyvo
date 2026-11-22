@@ -40,7 +40,7 @@ The one thing Folyvo asks the internet is, once a day, whether a newer Folyvo ex
 
 ## Status
 
-Folyvo is under development and there is no download yet. The first release will be a signed app for macOS on Apple Silicon ([#51](https://github.com/bilalyazicioglu/Folyvo/issues/51)). Until then you can [run it from source](docs/development/desktop.md).
+Folyvo is in pre-beta. [Download it from Releases](https://github.com/bilalyazicioglu/Folyvo/releases/latest) for macOS 14 or later, on Apple silicon and Intel Macs, or [run it from source](docs/development/desktop.md).
 
 Windows is not planned yet. If you want it, add a 👍 to [#67](https://github.com/bilalyazicioglu/Folyvo/issues/67).
 
