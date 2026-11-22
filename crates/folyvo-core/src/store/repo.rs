@@ -709,6 +709,21 @@ pub(crate) fn stored_files_by_item(c: &Connection) -> Result<Vec<StoredFile>> {
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
+
+pub(crate) fn kept_versions(c: &Connection, item: &ItemId) -> Result<HashSet<VersionId>> {
+    let mut stmt = c.prepare("SELECT id FROM versions WHERE item_id = ?1 AND keep = 1")?;
+    let rows = stmt.query_map([item.as_str()], |r| {
+        let id: String = r.get(0)?;
+        VersionId::parse(&id).map_err(|e| conv(0, e))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
+}
+
+pub(crate) fn keeps_all(c: &Connection, item: &ItemId) -> Result<bool> {
+    Ok(c.query_row("SELECT keep_all FROM items WHERE id = ?1", [item.as_str()], |r| r.get(0))
+        .optional()?
+        .unwrap_or(false))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
