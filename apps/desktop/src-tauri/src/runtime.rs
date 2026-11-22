@@ -913,8 +913,10 @@ mod tests {
         let now = 20_000 * DAY + DAY / 2;
         month_old_saves(dir.path(), now, Some(true));
         let rt = start_at(dir.path(), Arc::new(folyvo_core::ports::FakeClock::new(now)));
-        wait_until("older saves to go", || rt.engine.older_saves().unwrap().saves == 0);
+        // What went is noted once every batch is done, a moment after the last save goes.
+        wait_until("older saves to go", || rt.engine.last_let_go().unwrap().is_some());
         assert_eq!(rt.engine.last_let_go().unwrap().map(|l| l.saves), Some(1));
+        assert_eq!(rt.engine.older_saves().unwrap().saves, 0);
     }
 
     #[test]
