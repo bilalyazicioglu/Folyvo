@@ -683,6 +683,31 @@ pub(crate) fn delete_versions(c: &Connection, versions: &[VersionId]) -> Result<
     Ok(Deleted { versions: deleted, unused })
 }
 
+/// A stored file of an item, with how many of its saves use it.
+pub(crate) struct StoredFile {
+    pub item: ItemId,
+    pub name: String,
+    pub hash: ContentHash,
+    pub saves: usize,
+}
+
+pub(crate) fn stored_files_by_item(c: &Connection) -> Result<Vec<StoredFile>> {
+    let mut stmt = c.prepare(
+        "SELECT v.item_id, i.display_name, v.content_hash, COUNT(*) FROM versions v
+         JOIN items i ON i.id = v.item_id GROUP BY v.item_id, v.content_hash",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let item: String = r.get(0)?;
+        let hash: String = r.get(2)?;
+        Ok(StoredFile {
+            item: ItemId::parse(&item).map_err(|e| conv(0, e))?,
+            name: r.get(1)?,
+            hash: ContentHash::parse(&hash).map_err(|e| conv(2, e))?,
+            saves: r.get::<_, i64>(3)? as usize,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
