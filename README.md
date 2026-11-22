@@ -36,6 +36,8 @@ Choose a folder. Then work in Word, Excel, or any app you already use. There is 
 
 No account. No cloud. Folyvo reads your files and keeps copies in your own Library folder. Nothing is uploaded, and nothing leaves your computer unless you send it.
 
+The one thing Folyvo asks the internet is, once a day, whether a newer Folyvo exists. The request goes to GitHub and carries nothing about you or your files; GitHub sees it the way it sees any visit to a page. Nothing is installed until you choose to, and you can turn the check off in the window that shows how much room Folyvo takes.
+
 ## Status
 
 Folyvo is under development and there is no download yet. The first release will be a signed app for macOS on Apple Silicon ([#51](https://github.com/bilalyazicioglu/Folyvo/issues/51)). Until then you can [run it from source](docs/development/desktop.md).
