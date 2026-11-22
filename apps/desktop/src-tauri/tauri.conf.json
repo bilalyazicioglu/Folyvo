@@ -34,5 +34,13 @@
       },
       "signingIdentity": "-"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFQzQ3M0U5MjE4NzA3NUIKUldSYkI0Y2g2WFBFenY0UXIvTzBlZ1J2WDdxQ2laeXVqQlJNK0xxU3Z2TjFoWFYyd1NkNE1PZzMK",
+      "endpoints": [
+        "https://github.com/bilalyazicioglu/Folyvo/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

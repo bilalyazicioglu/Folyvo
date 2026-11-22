@@ -272,6 +272,10 @@ impl AppRuntime {
         Ok(())
     }
 
+    pub fn engine(&self) -> Arc<Engine> {
+        self.engine.clone()
+    }
+
     pub fn api(&self) -> AppApi {
         AppApi::new(self.engine.clone())
     }
