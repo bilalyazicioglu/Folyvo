@@ -4,14 +4,15 @@
   --border: #d9dadf;
   --hover: rgb(0 0 0 / 0.06);
   --field: rgb(0 0 0 / 0.07);
-  --ink: #1d1d1f;
-  --muted: #5f6168;
-  --accent: #1f7a4d;
+  --ink: #253344;
+  --muted: #4d5c6d;
+  /* The website's blue does things and marks what is chosen; peach marks what is kept. */
+  --accent: #356687;
   --accent-ink: #ffffff;
   /* Accent as text on the page; brighter in the dark scheme so it still reads. */
-  --accent-text: #1f7a4d;
+  --accent-text: #356687;
   --danger: #9b2c2c;
-  --focus: #0a60ff;
+  --focus: #356687;
   --ok: #30b34f;
   --radius: 10px;
   /* How much of the page colour lies over the native glass, and the light caught by its edge. */
@@ -24,7 +25,11 @@
   --stage-bg: #f2f2f5;
   --side-tint: 0%;
   --sheet: #ffffff;
-  --accent-soft: rgb(31 122 77 / 0.2);
+  --accent-soft: rgb(53 102 135 / 0.16);
+  --chart: #7eafd1;
+  --chart-soft: #adcce2;
+  --keep-soft: #f6d7c6;
+  --keep-text: #985435;
   --font: -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
 }
 
@@ -38,8 +43,8 @@
     --ink: #f2f2f5;
     --muted: #aaaab2;
     --danger: #ff9a90;
-    --focus: #6aa2ff;
-    --accent-text: #5fd08f;
+    --focus: #8fc7ef;
+    --accent-text: #8fc7ef;
     --glass-tint: 0%;
     --glass-rim: rgb(255 255 255 / 0.18);
     --raised: rgb(255 255 255 / 0.1);
@@ -48,7 +53,10 @@
     --stage-bg: #1b1b20;
     --side-tint: 0%;
     --sheet: #3a3a40;
-    --accent-soft: rgb(95 208 143 / 0.22);
+    --accent-soft: rgb(143 199 239 / 0.22);
+    --chart-soft: rgb(126 175 209 / 0.5);
+    --keep-soft: rgb(239 182 143 / 0.24);
+    --keep-text: #f3c3a3;
   }
 }
 
