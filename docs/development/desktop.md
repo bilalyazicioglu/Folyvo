@@ -79,6 +79,18 @@ Every save after the first carries a short summary of what changed since the sav
 
 Contributor builds are signed ad hoc, not with a Developer ID. To open one, right click the app and choose Open, or open System Settings, Privacy & Security and press **Open Anyway**. For a build you made yourself, `xattr -dr com.apple.quarantine Folyvo.app` removes the quarantine flag. macOS asks once per folder (Desktop, Documents, Downloads) whether Folyvo may access it. That prompt is part of the flow.
 
+## README animation
+
+Run `bash scripts/build-demo.sh` from the repository root to rebuild the GIF and
+animated AVIF together. This needs FFmpeg with `libsvtav1`, Gifsicle, and Git
+history containing `f8a8c37` (the original fixed-camera recording). You can pass a
+local recording as the first argument instead; the script uses seconds 2–14,
+then holds the restored result for two more seconds before looping.
+
+The demo keeps a fixed viewport and the recording's native 15 fps. The GIF is
+720 pixels wide, matching its README display size; the AVIF is 960 pixels wide.
+Avoid adding animated zooms or increasing the frame rate by duplicating frames.
+
 ## Manual demo
 
 Walk through this on a real Mac whenever the window code changes:
